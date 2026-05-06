@@ -1,0 +1,125 @@
+# Agent Instructions — svelte-remote-control
+
+After completing **any** change to this library — new files, modified logic, new dependencies, architectural decisions, or discovered gotchas — **update this file** to reflect the current state. Keep the Known Gotchas, Key Architecture Decisions, and File Layout sections accurate and up to date. Do not defer updates to a later session.
+
+---
+
+## Scope
+
+This folder is a self-contained WebRTC connection primitive (`svelte-remote-control`). It is designed to be extractable into a standalone npm package. Keep it free of app-specific logic — the consuming project (e.g. `store-tracker-movenet`) lives in `src/routes/`, not here.
+
+---
+
+## File Layout
+
+| File | Responsibility | Dependencies |
+|---|---|---|
+| `webrtc.svelte.ts` | `WebRTCConnection` class: PeerJS transport + reactive `$state` fields for status/peers. | `peerjs`, Svelte 5 runes |
+| `rcState.svelte.ts` | Module-level singleton `connection`, `__sync` wiring, public functional API (`send`, `onMessage`, `onCall`, `makeCall`, `startCall`, `rcState`, `deleteRcState`, `connStatus`). | `webrtc.svelte.ts` |
+| `RemoteControl.svelte` | UI (QR + popover status). Re-exports the full public API through `<script module>`. | `rcState.svelte.ts`, `qrcode`, `$app/paths`, `$app/state`, `$app/environment` |
+| `README.md` | Consumer-facing package documentation. |  |
+
+**Import rule:** `webrtc.svelte.ts` must not import SvelteKit or any UI dependencies. `rcState.svelte.ts` must not import SvelteKit. Only `RemoteControl.svelte` is allowed to touch `$app/*` — this is the future extraction boundary.
+
+---
+
+## Public API Surface
+
+All of these are re-exported from `RemoteControl.svelte` so consumers write a single import:
+
+```ts
+import RemoteControl, {
+    rcState, deleteRcState, connStatus,
+    send, onMessage,
+    makeCall, startCall, onCall,
+    WebRTCConnection, // class, for advanced/multi-instance use
+} from 'svelte-remote-control';
+```
+
+`WebRTCConnection` and `ConnectionStatus` are also exported for consumers who want the bare class without the singleton or UI.
+
+---
+
+## Key Architecture Decisions
+
+- **Three-file split** is deliberate: the class (transport) has zero SvelteKit deps; the singleton module (wiring + reactive sync helpers) has zero SvelteKit deps; only the UI component imports `$app/*`. This keeps the extraction path clean.
+- **Singleton + class, both exported.** The singleton (`connection` in `rcState.svelte.ts`) covers the common case. `WebRTCConnection` is exported as a class for apps that need multiple independent connections.
+- **Message types stay flexible, not strongly generic.** `send()` and `onMessage()` use `{ type: string; [k: string]: unknown }`. A generic `createChannel<T>()` was considered and deliberately rejected — flexibility is valued over compile-time message typing.
+- **`rcState` is last-write-wins (LWW)**, no causal ordering. Documented in the module docstring and README. Suitable for UI state, not counters/carts.
+- **Star topology assumption.** Guests connect to the host; the host rebroadcasts `__sync` messages to all other guests (sender excluded to prevent echo). A `onPeerConnect` hook flushes the full value map to each new peer.
+- **Optional validators** on `rcState(key, initial, validate?)`. Invalid persisted values are replaced with `initial`; invalid incoming `__sync` payloads are dropped and **not** rebroadcast.
+- **Storage is namespaced** with `rc:` prefix (`rc:state`, `rc:hostPeerId`) to avoid colliding with host-app `sessionStorage` keys.
+- **`onMessage` / `onCall` auto-cleanup was removed** (was a silent `try { onDestroy(unsub) } catch {}` that only worked during top-level component init). Callers now wrap in `$effect(() => onMessage(...))` — Svelte's effect teardown runs the returned unsub deterministically.
+- **`_peerId` / `_role` tagging was removed** from `send()`. The `fromPeerId` argument in `onMessage((msg, fromPeerId) => ...)` comes from the underlying DataConnection and is authoritative / un-spoofable.
+- **Reactive UI URLs** in `RemoteControl.svelte` use `$derived` (not `$state` + effect) so `QRCode.toDataURL()` only re-runs when the URL string identity actually changes. A `cancelled` flag on the generation effect prevents stale promises from overwriting newer QRs.
+- **Popover state** uses a single `popoverOpen` $state with a DOM-sync `$effect` (idempotent, guards with `:popover-open`) plus an `ontoggle` handler to capture manual dismiss. No imperative `showPopover()` / `hidePopover()` scattered through lifecycle code.
+- **Retry uses reactive `retryAttempt`** (`$state`). The retry `$effect` depends on it explicitly, so increments deterministically schedule the next attempt instead of relying on status-transition coincidence.
+
+---
+
+## Known Gotchas
+
+- **`localPeerId` is cleared on `destroy()`.** This means the trigger UI loses its peer-ID label immediately on disconnect. This is intentional — the field represents "current" identity, not "last known". Do not change this without a conscious decision.
+- **Module-level handlers in `rcState.svelte.ts` are never unsubscribed.** This is intentional — they live for the lifetime of the singleton. `connection.destroy()` preserves handler sets by design so the wiring survives reconnects. The relevant comment is above the `connection.onMessage(...)` call.
+- **`onDestroy` wrapping in try/catch is dead-end magic.** Don't bring it back. If you need automatic cleanup, wrap the subscription in `$effect(() => onMessage(...))` at the call site.
+- **`acceptOffer` / `#createPeer` remove listeners mutually on resolve.** Don't simplify this into single `.once('error', reject)` + `.once('open', resolve)` — the stray listeners leak and mask later errors.
+- **Post-open peer errors** are handled by a persistent `peer.on('error')` in `#createPeer`. Fatal errors (`peer.destroyed`) set `status = 'error'`; transient `peer-unavailable` / `webrtc` errors only warn. A stale-listener guard (`this.#peer !== peer`) protects against callbacks firing after `destroy()`.
+- **Media calls are tracked** in `#mediaCalls: Set<MediaConnection>`. `#cleanup` closes them explicitly — don't rely on `peer.destroy()` cascading.
+- **PeerJS statically imports `@mediapipe/pose` internals even when unused.** This is the host project's problem; handled via Vite `optimizeDeps` exclusion + stub alias in the project root. Not a library concern unless you add BlazePose.
+- **`sessionStorage` is guarded** at module init (`typeof sessionStorage !== 'undefined'`) because a future SSR context might load this module before `window` exists. Don't remove the guard.
+- **`remoteHref` is typed `AppRoute`** (SvelteKit's generated route union). This is the single SvelteKit coupling point. When extracting to a standalone package, this prop must become `string` again and the `$app/paths` imports need to be replaced with a `basePath` prop.
+- **Writing large Svelte files via shell heredoc fails** when content contains backticks. Use `create_file` or edit via tool calls.
+
+---
+
+## Extraction Checklist (when publishing as a package)
+
+1. Move `$app/*` imports out of `RemoteControl.svelte` — accept `basePath: string` and `currentPath: string` as props instead, with a thin SvelteKit wrapper in consuming projects.
+2. Change `remoteHref: AppRoute` → `remoteHref: string`.
+3. Add `package.json` with `"exports"`, `"svelte"`, `"types"` fields. Peer-dep `svelte`, `peerjs`, `qrcode`.
+4. Add `svelte-package` build config.
+
+---
+
+## Dependencies
+
+| Package | Purpose |
+|---|---|
+| `peerjs` | WebRTC data + media connections |
+| `qrcode` | QR code generation for peer ID URL |
+| `@types/qrcode` | TypeScript types (dev dep) |
+| `svelte` ≥ 5 | Runes (`$state`, `$derived`, `$effect`) |
+
+---
+
+## Project Configuration
+
+- **Language**: TypeScript
+- **Package Manager**: npm
+- **Add-ons**: mcp
+
+---
+
+You are able to use the Svelte MCP server, where you have access to comprehensive Svelte 5 and SvelteKit documentation. Here's how to use the available tools effectively:
+
+## Available Svelte MCP Tools:
+
+### 1. list-sections
+
+Use this FIRST to discover all available documentation sections. Returns a structured list with titles, use_cases, and paths.
+When asked about Svelte or SvelteKit topics, ALWAYS use this tool at the start of the chat to find relevant sections.
+
+### 2. get-documentation
+
+Retrieves full documentation content for specific sections. Accepts single or multiple sections.
+After calling the list-sections tool, you MUST analyze the returned documentation sections (especially the use_cases field) and then use the get-documentation tool to fetch ALL documentation sections that are relevant for the user's task.
+
+### 3. svelte-autofixer
+
+Analyzes Svelte code and returns issues and suggestions.
+You MUST use this tool whenever writing Svelte code before sending it to the user. Keep calling it until no issues or suggestions are returned.
+
+### 4. playground-link
+
+Generates a Svelte Playground link with the provided code.
+After completing the code, ask the user if they want a playground link. Only call this tool after user confirmation and NEVER if code was written to files in their project.

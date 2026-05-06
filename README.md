@@ -1,0 +1,251 @@
+# svelte-remote-control
+
+Peer-to-peer connection primitive for Svelte 5 apps. Connect a host (e.g. a laptop) to one or more guests (e.g. phones) over WebRTC with a single `<RemoteControl />` component — no signalling server to run yourself, a QR code UI out of the box, and reactive state that syncs across peers.
+
+Built on [PeerJS](https://peerjs.com) for WebRTC transport, Svelte 5 runes for reactivity.
+
+## Features
+
+- **Drop-in UI** — `<RemoteControl />` renders a floating status indicator with QR code, copyable peer ID, and connection management.
+- **Data channel** — broadcast JSON messages between peers with `send()` / `onMessage()`.
+- **Media calls** — stream camera or microphone between peers with `startCall()` / `onCall()`.
+- **Synced reactive state** — `rcState()` returns a `$state`-like object whose value automatically syncs across all connected peers (last-write-wins).
+- **Auto-reconnect** — exponential backoff on connection loss, preserving the peer ID across session reloads.
+- **Typed routing** — the `remoteHref` prop is typed against SvelteKit's generated route union.
+- **No signalling server required** — uses the free public PeerJS broker by default; bring your own via the class API.
+
+## Installation
+
+```bash
+npm install svelte-remote-control
+```
+
+Peer dependencies: `svelte >= 5.0`, `peerjs`, `qrcode`.
+
+## Quick start
+
+### Laptop / host route (`src/routes/+page.svelte`)
+
+```svelte
+<script lang="ts">
+    import RemoteControl, { onCall } from 'svelte-remote-control';
+
+    let videoEl: HTMLVideoElement;
+
+    $effect(() => onCall((stream) => {
+        videoEl.srcObject = stream;
+        videoEl.play();
+    }));
+</script>
+
+<RemoteControl remoteHref="/remote" />
+
+<video bind:this={videoEl} autoplay playsinline muted></video>
+```
+
+### Phone / guest route (`src/routes/remote/+page.svelte`)
+
+```svelte
+<script lang="ts">
+    import RemoteControl, { startCall, connStatus } from 'svelte-remote-control';
+
+    $effect(() => {
+        if (connStatus() === 'connected') {
+            startCall({ video: { facingMode: 'environment' }, audio: false });
+        }
+    });
+</script>
+
+<RemoteControl remoteHref="/remote" />
+```
+
+Open the laptop page, scan the QR code with the phone — and you're connected.
+
+## Component
+
+### `<RemoteControl />`
+
+Renders a small floating status trigger (top-right by default) with a popover containing:
+- A QR code and copyable URL for guests to scan.
+- Connection status (idle / gathering / awaiting / connected / disconnected / error).
+- The list of connected peer IDs on the host side.
+- A manual-entry field for pasting a peer ID.
+- Retry state (countdown and stop button) on the guest side.
+
+#### Props
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `remoteHref` | `AppRoute` (SvelteKit route) | current page | Route that guests should be sent to. Omit for same-route connections (useful for peer-to-peer symmetric apps); set to a `/remote` route when the host and guest interfaces differ. |
+
+The component auto-detects its role from the URL: if `?id=…` is present, it acts as a guest and joins that peer ID; otherwise, it acts as a host and advertises its own ID.
+
+## Reactive state API
+
+### `rcState<T>(key, initial, validate?)`
+
+Create a reactive value that automatically syncs to all connected peers.
+
+```ts
+import { rcState } from 'svelte-remote-control';
+
+const brightness = rcState('brightness', 50);
+
+// template:
+<input type="range" min="0" max="100" bind:value={brightness.value} />
+```
+
+Reading or writing `brightness.value` works like any `$state` rune. Writes broadcast a `__sync` message to all peers; receivers update their local copy and rebroadcast to their remaining peers (with the sender excluded to prevent echo).
+
+Values are persisted to `sessionStorage` (`rc:state`) so they survive page reloads within the tab.
+
+#### Validation
+
+Pass an optional type-guard to protect against malformed peers and schema changes across sessions:
+
+```ts
+const mode = rcState<'light' | 'dark'>('mode', 'light',
+    (v): v is 'light' | 'dark' => v === 'light' || v === 'dark');
+```
+
+- Persisted values that fail validation are replaced with `initial`.
+- Incoming `__sync` messages that fail validation are dropped and **not** rebroadcast.
+
+#### Sync semantics
+
+`rcState` is **last-write-wins (LWW)** without causal ordering. Concurrent writes from different peers silently overwrite each other; the order of arrival on each peer determines the final value, so peers may temporarily disagree until the network settles. Suitable for UI state (slider positions, toggles, form inputs) where occasional lost updates are tolerable. **Not** suitable for counters, carts, or anything requiring convergence under concurrent edits.
+
+### `deleteRcState(key)`
+
+Remove a synced key locally and broadcast the deletion. Subsequent `rcState(key, initial)` calls will reset to `initial`. Deletion is also LWW — a concurrent write on another peer may resurrect the key.
+
+### `connStatus()`
+
+Returns the current connection status reactively. Call inside a `$derived`, `$effect`, or template:
+
+```ts
+const isConnected = $derived(connStatus() === 'connected');
+```
+
+Possible values: `'idle' | 'gathering' | 'awaiting' | 'connected' | 'disconnected' | 'error'`.
+
+## Messaging API
+
+### `send(message)`
+
+Broadcast a JSON-serialisable message to all connected peers.
+
+```ts
+import { send } from 'svelte-remote-control';
+
+send({ type: 'notification', title: 'Hi!' });
+```
+
+Messages must have a `type` field. Beyond that, the payload is free-form — this primitive optimises for flexibility.
+
+### `onMessage(handler)`
+
+Register an incoming-message handler. Returns an unsubscribe function — wrap in a `$effect` for automatic cleanup:
+
+```ts
+import { onMessage } from 'svelte-remote-control';
+
+$effect(() => onMessage((msg, fromPeerId) => {
+    if (msg.type === 'notification') {
+        console.log(`From ${fromPeerId}: ${msg.title}`);
+    }
+}));
+```
+
+`fromPeerId` is the authoritative peer ID from the underlying DataConnection — it cannot be spoofed by the sender.
+
+## Media / calls API
+
+### `startCall(constraints): Promise<MediaStream>`
+
+Acquire a local media stream via `getUserMedia` and call all connected peers with it. Supports audio-only, video-only, or both:
+
+```ts
+import { startCall } from 'svelte-remote-control';
+
+await startCall({ video: true });                              // video only
+await startCall({ audio: true });                              // audio only
+await startCall({ video: true, audio: true });                 // both
+await startCall({ video: { facingMode: 'environment' } });     // constraints
+```
+
+Returns the acquired `MediaStream` so you can stop its tracks when disconnecting.
+
+### `makeCall(stream)`
+
+Lower-level: call all connected peers with a stream you acquired yourself. Use this when you want control over the timing of `getUserMedia` separately from the call (e.g. acquire before connection, call after).
+
+```ts
+import { makeCall } from 'svelte-remote-control';
+
+const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+// …later, once connected…
+makeCall(stream);
+```
+
+### `onCall(handler)`
+
+Register an incoming-stream handler. Returns an unsubscribe function — wrap in a `$effect` for automatic cleanup:
+
+```ts
+import { onCall } from 'svelte-remote-control';
+
+$effect(() => onCall((stream) => {
+    videoEl.srcObject = stream;
+    videoEl.play();
+}));
+```
+
+## Advanced: multi-instance connections
+
+The singleton API covers most cases, but if you need multiple independent connections from one app (e.g. a dashboard that hosts one connection and guests on another), use the class directly:
+
+```ts
+import { WebRTCConnection } from 'svelte-remote-control';
+
+const conn = new WebRTCConnection();
+
+await conn.createOffer();      // host
+await conn.acceptOffer(hostId); // guest
+
+conn.send({ type: 'ping' });
+conn.onMessage((msg, from) => console.log(from, msg));
+
+// Reactive `$state` fields:
+conn.status;           // ConnectionStatus
+conn.connectedPeers;   // string[]
+conn.localPeerId;      // string
+conn.role;             // 'host' | 'guest' | null
+conn.error;            // string | null
+```
+
+Pass custom ICE servers if you need TURN relays:
+
+```ts
+const conn = new WebRTCConnection([
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'turn:my-turn.example.com', username: 'u', credential: 'c' },
+]);
+```
+
+## How it works
+
+- **Signalling** uses the free public [PeerJS broker](https://peerjs.com/peerserver). No server setup required. The host publishes a random peer ID, the guest scans/enters it to establish a WebRTC connection. After that, all traffic is peer-to-peer.
+- **Topology** is a star: guests connect to the host; the host relays `__sync` messages between guests so they stay in sync with each other.
+- **Storage** uses `sessionStorage` with the `rc:` prefix (`rc:state`, `rc:hostPeerId`) so the library is self-contained and won't collide with host-app keys.
+- **Transport** is PeerJS DataConnections (reliable, JSON-serialised) for messages, and MediaConnections for streams.
+
+## Requirements
+
+- Svelte 5.0 or newer (uses runes).
+- A browser with WebRTC support (all modern evergreen browsers).
+- HTTPS or `localhost` for `getUserMedia` in media calls.
+
+## License
+
+MIT
