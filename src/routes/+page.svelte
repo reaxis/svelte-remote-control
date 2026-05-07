@@ -1,21 +1,15 @@
 <script lang="ts">
-	import RemoteControl, { rcState, onCall } from '$lib/index.js';
+	import RemoteControl, { rcState } from '$lib/index.js';
 
 	const brightness = rcState('brightness', 50);
 	const hue = rcState('hue', 180);
-
-	let videoEl: HTMLVideoElement;
-	$effect(() => onCall((stream: MediaStream) => {
-		videoEl.srcObject = stream;
-		videoEl.play();
-	}));
 </script>
 
 <RemoteControl remoteHref="/remote" />
 
 <main>
 	<h1>Remote Control Demo</h1>
-	<p class="hint">Open this page on another device (scan the QR in the top-right) to see state sync in action. The guest at <code>/remote</code> can also stream video back.</p>
+	<p class="hint">Open this page on another device (scan the QR in the top-right) to see state sync in action.</p>
 
 	<div class="sliders">
 		<label>
@@ -34,7 +28,7 @@
 		style="background: hsl({hue.value}deg {brightness.value}% 50%)"
 	></div>
 
-	<video bind:this={videoEl} autoplay playsinline muted class="preview"></video>
+
 </main>
 
 <style>
@@ -85,15 +79,4 @@
 		transition: background 0.1s;
 	}
 
-	.preview {
-		width: 100%;
-		border-radius: 12px;
-		margin-top: 1.5rem;
-		background: #111;
-		display: block;
-	}
-
-	.preview:not([srcobject]) {
-		display: none;
-	}
 </style>
