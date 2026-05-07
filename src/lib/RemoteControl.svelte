@@ -145,7 +145,7 @@
 	// (copy feedback flags, status transitions without identity change) does
 	// not re-trigger `QRCode.toDataURL`.
 
-	const QR_OPTS = { errorCorrectionLevel: 'M' as const, width: 240, margin: 2 };
+	const QR_OPTS = { errorCorrectionLevel: 'M' as const, width: 240, margin: 3 };
 
 	$effect(() => {
 		if (!remoteUrl) { peerQr = ''; return; }
@@ -274,11 +274,20 @@
 				{#if hostQr}
 					<img src={hostQr} alt="Host QR code" class="qr" />
 				{/if}
-				<p class="peer-label">Host</p>
-				<code class="peer-id">{myConn.connectedPeers[0]}</code>
-				<button class="btn secondary" onclick={copyHostId}>{copiedHostId ? 'Copied!' : 'Copy host ID'}</button>
-				<code class="peer-id url">{hostUrl}</code>
-				<button class="btn secondary" onclick={copyHostUrl}>{copiedHostUrl ? 'Copied!' : 'Copy URL'}</button>
+				<div class="peer-field-row">
+					<span class="peer-field-label">URL</span>
+					<div class="peer-id">
+						<span>{hostUrl}</span>
+						<button class="btn-copy-inline" class:copied={copiedHostUrl} onclick={copyHostUrl} title="Copy URL"></button>
+					</div>
+				</div>
+				<div class="peer-field-row">
+					<span class="peer-field-label">ID</span>
+					<div class="peer-id">
+						<span>{myConn.connectedPeers[0]}</span>
+						<button class="btn-copy-inline" class:copied={copiedHostId} onclick={copyHostId} title="Copy host ID"></button>
+					</div>
+				</div>
 
 			{:else if myConn.status === 'disconnected'}
 				<p class="status-badge disconnected">Disconnected</p>
@@ -309,17 +318,29 @@
 				{#if peerQr}
 					<img src={peerQr} alt="Peer ID QR code" class="qr" />
 				{/if}
-				<code class="peer-id">{myConn.localPeerId}</code>
-				<button class="btn secondary" onclick={copyId}>{copied ? 'Copied!' : 'Copy ID'}</button>
-				<code class="peer-id url">{remoteUrl}</code>
-				<button class="btn secondary" onclick={copyUrl}>{copiedUrl ? 'Copied!' : 'Copy URL'}</button>
+				<div class="peer-field-row">
+					<span class="peer-field-label">URL</span>
+					<div class="peer-id">
+						<span>{remoteUrl}</span>
+						<button class="btn-copy-inline" class:copied={copiedUrl} onclick={copyUrl} title="Copy URL"></button>
+					</div>
+				</div>
+				<div class="peer-field-row">
+					<span class="peer-field-label">ID</span>
+					<div class="peer-id">
+						<span>{myConn.localPeerId}</span>
+						<button class="btn-copy-inline" class:copied={copied} onclick={copyId} title="Copy ID"></button>
+					</div>
+				</div>
 
 				{#if myConn.status === 'awaiting'}
 					<p class="hint">Waiting for a client to connect…</p>
 					<hr class="divider" />
-					<p class="hint">Or connect to a peer by ID:</p>
-					<input class="peer-input" type="text" placeholder="Paste peer ID…" bind:value={peerIdInput} />
-					<button class="btn secondary" onclick={() => connect()} disabled={!peerIdInput.trim()}>Connect</button>
+					<p class="hint">… or connect to a host by ID:</p>
+					<div class="peer-connect-row">
+						<input class="peer-input" type="text" placeholder="Paste ID…" bind:value={peerIdInput} />
+						<button class="btn secondary btn-sm" onclick={() => connect()} disabled={!peerIdInput.trim()}>Connect</button>
+					</div>
 				{:else}
 					<hr class="divider" />
 					<div class="remotes">
@@ -389,21 +410,18 @@
 		font-family: system-ui, sans-serif;
 		color: #888;
 		letter-spacing: 0.04em;
-		line-height: 1;
 	}
 
 	.trigger-label {
 		font-size: 0.8rem;
 		font-family: monospace;
 		color: #333;
-		line-height: 1;
 	}
 
 	.trigger-count {
-		font-size: 0.75rem;
+		font-size: 0.8rem;
 		font-family: monospace;
-		color: #888;
-		line-height: 1;
+		color: #aaa;
 	}
 
 	.trigger-spinner {
@@ -445,7 +463,10 @@
 		gap: 0.5rem;
 	}
 
-	.conn-header h2 { margin: 0; }
+	.conn-header h2 {
+		margin: 0;
+		font-size: 1.25rem;
+	}
 
 	.btn-sm {
 		padding: 0.35rem 0.75rem;
@@ -460,18 +481,69 @@
 	}
 
 	.peer-id {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
 		font-family: monospace;
-		font-size: 0.8rem;
+		font-size: 0.7rem;
+		color: #555;
 		background: #f5f5f5;
 		border: 1px solid #e0e0e0;
 		border-radius: 6px;
-		padding: 0.4rem 0.6rem;
+		padding: 0.4rem 0.4rem 0.4rem 0.6rem;
+	}
+
+	.peer-id span {
+		flex: 1;
 		word-break: break-all;
 	}
 
-	.peer-id.url {
+	.peer-field-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.peer-field-row .peer-id {
+		flex: 1;
+	}
+
+	.peer-field-label {
+		width: 1.75rem;
+		flex-shrink: 0;
 		font-size: 0.7rem;
-		color: #555;
+		font-weight: 600;
+		color: #888;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		text-align: right;
+	}
+
+	.btn-copy-inline {
+		flex-shrink: 0;
+		border: 1px solid #d0d0d0;
+		cursor: pointer;
+		width: 2rem;
+		aspect-ratio: 1 / 1;
+		border-radius: 4px;
+		line-height: 1;
+		transition: color 0.1s, background 0.1s, border-color 0.1s;
+		align-self: flex-start;
+		background-color: #fff;
+		background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7.5 10v1.5h-6v-8h1.5M10.5 2.5v6h-6v-8h4z' fill='none' stroke='%23000' /%3E%3C/svg%3E");
+		background-size: 60%;
+		background-position: center;
+		background-repeat: no-repeat;
+	}
+
+	.btn-copy-inline.copied {
+		background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1.5 5.5l3.5 3.5l5.5 -5.5' fill='none' stroke='%23000' /%3E%3C/svg%3E");
+	}
+
+	.btn-copy-inline:hover {
+		color: #333;
+		background-color: #f0f0f0;
+		border-color: #aaa;
 	}
 
 	.peer-label {
@@ -487,6 +559,16 @@
 		border: none;
 		border-top: 1px solid #e8e8e8;
 		margin: 0;
+	}
+
+	.peer-connect-row {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+	}
+
+	.peer-connect-row .peer-input {
+		flex: 1;
 	}
 
 	.peer-input {
