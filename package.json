@@ -1,5 +1,5 @@
 {
-	"name": "svelte-remote-control",
+	"name": "@reaxis/svelte-remote-control",
 	"version": "0.1.0",
 	"description": "Peer-to-peer WebRTC connection primitive for Svelte 5 with auto-QR, synced reactive state, and media calls.",
 	"keywords": [
