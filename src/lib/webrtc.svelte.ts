@@ -50,6 +50,7 @@ export class WebRTCConnection<TMessage extends { type: string } = { type: string
 	#callHandlers = new Set<(stream: MediaStream) => void>();
 	#iceServers: RTCIceServer[];
 	#peerServer: PeerServerOptions | undefined;
+	#unloadHandler: (() => void) | null = null;
 
 	constructor(options?: RTCIceServer[] | WebRTCConnectionOptions) {
 		if (Array.isArray(options)) {
@@ -232,6 +233,16 @@ export class WebRTCConnection<TMessage extends { type: string } = { type: string
 		});
 
 		this.localPeerId = peer.id;
+
+		// Explicitly close DataConnections on tab close so the remote end receives
+		// an SCTP FIN and fires dc.on('close') immediately (without this, the host
+		// waits ~30s for ICE keepalives to time out).
+		if (this.#unloadHandler) window.removeEventListener('beforeunload', this.#unloadHandler);
+		this.#unloadHandler = () => {
+			for (const dc of this.#connections.values()) { try { dc.close(); } catch { /* ignore */ } }
+		};
+		window.addEventListener('beforeunload', this.#unloadHandler);
+
 		return peer;
 	}
 
@@ -288,6 +299,10 @@ export class WebRTCConnection<TMessage extends { type: string } = { type: string
 	}
 
 	#cleanup(): void {
+		if (this.#unloadHandler) {
+			window.removeEventListener('beforeunload', this.#unloadHandler);
+			this.#unloadHandler = null;
+		}
 		for (const call of this.#mediaCalls) {
 			try { call.close(); } catch { /* ignore */ }
 		}
