@@ -46,7 +46,7 @@
 
 	// Detect role from URL on component mount.
 	const guestId = $derived(isBrowser ? new URLSearchParams(window.location.search).get('id') : null);
-	const isGuest = $derived(guestId !== null || connection.role === 'guest');
+	const isGuest = $derived(guestId !== null ? connection.role !== 'host' : connection.role === 'guest');
 
 	const myConn = connection;
 
@@ -109,8 +109,8 @@
 	// Guest flow: auto-open while connecting, auto-close once connected.
 	// The user can still manually reopen via the trigger button at any time.
 	$effect(() => {
-		if (!guestId) return;
-		if (myConn.status === 'idle' || myConn.status === 'gathering') popoverOpen = true;
+		if (!isGuest) return;
+		if (myConn.status === 'gathering') popoverOpen = true;
 		else if (myConn.status === 'connected') popoverOpen = false;
 	});
 
@@ -198,6 +198,11 @@
 		setTimeout(() => (copiedHostUrl = false), 2000);
 	}
 
+	function disconnect() {
+		stopRetry();
+		startOffer();
+	}
+
 	function stopRetry() {
 		retryPeerId = null;
 		retryAttempt = 0;
@@ -244,13 +249,22 @@
 		bind:this={popoverEl}
 		ontoggle={(e) => { popoverOpen = (e as ToggleEvent).newState === 'open'; }}
 	>
-		<h2>Connection</h2>
+		<div class="conn-header">
+			<h2>Remote Control</h2>
+			{#if isGuest && myConn.status === 'connected'}
+				<button class="btn secondary btn-sm" onclick={disconnect}>Disconnect</button>
+			{/if}
+		</div>
 
 		{#if isGuest}
 			<!-- ── Guest mode ── -->
-			{#if myConn.status === 'idle' || myConn.status === 'gathering'}
+			{#if myConn.status === 'gathering'}
 				<p class="hint">Connecting…</p>
 				<div class="spinner"></div>
+
+			{:else if myConn.status === 'idle' && retryPeerId}
+				<p class="status-badge disconnected">Disconnected</p>
+				<button class="btn secondary" onclick={() => connect(retryPeerId!)}>Reconnect</button>
 
 			{:else if myConn.status === 'connected'}
 				{#if hostQr}
@@ -261,9 +275,6 @@
 				<button class="btn secondary" onclick={copyHostId}>{copiedHostId ? 'Copied!' : 'Copy ID'}</button>
 				<code class="peer-id url">{hostUrl}</code>
 				<button class="btn secondary" onclick={copyHostUrl}>{copiedHostUrl ? 'Copied!' : 'Copy URL'}</button>
-				<hr class="divider" />
-				<p class="status-badge connected">Connected</p>
-				<button class="btn secondary" onclick={() => myConn.destroy()}>Disconnect</button>
 
 			{:else if myConn.status === 'disconnected'}
 				<p class="status-badge disconnected">Disconnected</p>
@@ -404,6 +415,8 @@
 		top: 3.5rem;
 		right: 1rem;
 		width: 280px;
+		max-height: calc(100dvh - 6.5rem);
+		overflow-y: auto;
 		padding: 1rem;
 		background: #fff;
 		border: 1px solid #ddd;
@@ -418,7 +431,19 @@
 
 	.conn-popover:popover-open { display: flex; }
 
-	.conn-popover h2 { margin: 0 0 0.25rem; }
+	.conn-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.conn-header h2 { margin: 0; }
+
+	.btn-sm {
+		padding: 0.35rem 0.75rem;
+		font-size: 0.8rem;
+	}
 
 	.qr {
 		width: 240px;
