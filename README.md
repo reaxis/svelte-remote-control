@@ -1,6 +1,6 @@
 # @reaxis/svelte-remote-control
 
-Peer-to-peer connection primitive for Svelte 5 apps. Connect a host (e.g. a laptop) to one or more guests (e.g. phones) over WebRTC with a single `<RemoteControl />` component — no signalling server to run yourself, a QR code UI out of the box, and reactive state that syncs across peers.
+Peer-to-peer connection primitive for Svelte 5 apps. Connect a host (e.g. a laptop) to one or more clients (e.g. phones) over WebRTC with a single `<RemoteControl />` component — no signalling server to run yourself, a QR code UI out of the box, and reactive state that syncs across peers.
 
 Built on [PeerJS](https://peerjs.com) for WebRTC transport, Svelte 5 runes for reactivity.
 
@@ -43,7 +43,7 @@ Peer dependencies: `svelte >= 5.0`, `peerjs`, `qrcode`.
 <video bind:this={videoEl} autoplay playsinline muted></video>
 ```
 
-### Phone / guest route (`src/routes/remote/+page.svelte`)
+### Phone / client route (`src/routes/remote/+page.svelte`)
 
 ```svelte
 <script lang="ts">
@@ -66,19 +66,19 @@ Open the laptop page, scan the QR code with the phone — and you're connected.
 ### `<RemoteControl />`
 
 Renders a small floating status trigger (top-right by default) with a popover containing:
-- A QR code and copyable URL for guests to scan.
+- A QR code and copyable URL for clients to scan.
 - Connection status (idle / gathering / awaiting / connected / disconnected / error).
 - The list of connected peer IDs on the host side.
 - A manual-entry field for pasting a peer ID.
-- Retry state (countdown and stop button) on the guest side.
+- Retry state (countdown and stop button) on the client side.
 
 #### Props
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `remoteHref` | `string` | current page path | Path guests should be sent to (e.g. `"/remote"`). Omit for same-route connections (useful for peer-to-peer symmetric apps); set when host and guest interfaces are on different routes. |
+| `remoteHref` | `string` | current page path | Path clients should be sent to (e.g. `"/remote"`). Omit for same-route connections (useful for peer-to-peer symmetric apps); set when host and client interfaces are on different routes. |
 
-The component auto-detects its role from the URL: if `?id=…` is present, it acts as a guest and joins that peer ID; otherwise, it acts as a host and advertises its own ID.
+The component auto-detects its role from the URL: if `?id=…` is present, it acts as a client and joins that peer ID; otherwise, it acts as a host and advertises its own ID.
 
 ## Reactive state API
 
@@ -203,7 +203,7 @@ $effect(() => onCall((stream) => {
 
 ## Advanced: multi-instance connections
 
-The singleton API covers most cases, but if you need multiple independent connections from one app (e.g. a dashboard that hosts one connection and guests on another), use the class directly:
+The singleton API covers most cases, but if you need multiple independent connections from one app (e.g. a dashboard that hosts one connection and clients on another), use the class directly:
 
 ```ts
 import { WebRTCConnection } from '@reaxis/svelte-remote-control';
@@ -211,7 +211,7 @@ import { WebRTCConnection } from '@reaxis/svelte-remote-control';
 const conn = new WebRTCConnection();
 
 await conn.createOffer();      // host
-await conn.acceptOffer(hostId); // guest
+await conn.acceptOffer(hostId); // client
 
 conn.send({ type: 'ping' });
 conn.onMessage((msg, from) => console.log(from, msg));
@@ -220,7 +220,7 @@ conn.onMessage((msg, from) => console.log(from, msg));
 conn.status;           // ConnectionStatus
 conn.connectedPeers;   // string[]
 conn.localPeerId;      // string
-conn.role;             // 'host' | 'guest' | null
+conn.role;             // 'host' | 'client' | null
 conn.error;            // string | null
 ```
 
@@ -244,8 +244,8 @@ const conn = new WebRTCConnection({
 
 ## How it works
 
-- **Signalling** uses the free public [PeerJS broker](https://peerjs.com/peerserver). No server setup required. The host publishes a random peer ID, the guest scans/enters it to establish a WebRTC connection. After that, all traffic is peer-to-peer.
-- **Topology** is a star: guests connect to the host; the host relays `__sync` messages between guests so they stay in sync with each other.
+- **Signalling** uses the free public [PeerJS broker](https://peerjs.com/peerserver). No server setup required. The host publishes a random peer ID, the client scans/enters it to establish a WebRTC connection. After that, all traffic is peer-to-peer.
+- **Topology** is a star: clients connect to the host; the host relays `__sync` messages between clients so they stay in sync with each other.
 - **Storage** uses `sessionStorage` with the `rc:` prefix (`rc:state`, `rc:hostPeerId`) so the library is self-contained and won't collide with host-app keys.
 - **Transport** is PeerJS DataConnections (reliable, JSON-serialised) for messages, and MediaConnections for streams.
 
@@ -264,7 +264,7 @@ const conn = new WebRTCConnection({
 
 ## Troubleshooting
 
-- **"Connected" status but video never appears** — check that the host calls `onCall()` before the guest calls `startCall()`. If the stream event fires before the handler registers, the first stream is missed.
+- **"Connected" status but video never appears** — check that the host calls `onCall()` before the client calls `startCall()`. If the stream event fires before the handler registers, the first stream is missed.
 - **Peers connect on desktop but not on phone** — WebRTC requires HTTPS on non-localhost origins. Serve your app over HTTPS (e.g. `ngrok`, Cloudflare Tunnel, or a TLS cert).
 - **Connection drops behind restrictive NAT / corporate firewalls** — the default STUN servers are insufficient. Provide TURN servers via `new WebRTCConnection({ iceServers: [...] })`.
 - **QR code scans, app opens, but never connects** — the phone's PeerJS client can't reach the signalling broker. Usually a corporate captive portal. Switch networks or host your own PeerJS server.
@@ -272,7 +272,7 @@ const conn = new WebRTCConnection({
 
 ## Development playground
 
-Run `npm run dev` to open the playground. The home route (`/`) acts as the host pane; scan the QR code with a phone (or open `/remote?id=…` in a second tab) to connect as a guest.
+Run `npm run dev` to open the playground. The home route (`/`) acts as the host pane; scan the QR code with a phone (or open `/remote?id=…` in a second tab) to connect as a client.
 
 ## License
 

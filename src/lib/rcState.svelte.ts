@@ -14,7 +14,7 @@
  *   the order of arrival on each peer determines the final value, so peers
  *   may temporarily disagree until the network settles.
  * - On peer connect, the whole value map is flushed to the new peer. In a
- *   star topology (guests ↔ host) this is exactly one pass per new guest.
+ *   star topology (clients ↔ host) this is exactly one pass per new client.
  *
  * Suitable for UI state (slider positions, toggles, form inputs) where
  * occasional lost updates are tolerable. **Not** suitable for counters,

@@ -39,7 +39,7 @@ export class WebRTCConnection<TMessage extends { type: string } = { type: string
 	status = $state<ConnectionStatus>('idle');
 	error = $state<string | null>(null);
 	connectedPeers = $state<string[]>([]);
-	role = $state<'host' | 'guest' | null>(null);
+	role = $state<'host' | 'client' | null>(null);
 	localPeerId = $state('');
 
 	#peer: Peer | null = null;
@@ -94,7 +94,7 @@ export class WebRTCConnection<TMessage extends { type: string } = { type: string
 			this.#cleanup();
 			this.status = 'gathering';
 			this.error = null;
-			this.role = 'guest';
+			this.role = 'client';
 
 			const peer = await this.#createPeer();
 

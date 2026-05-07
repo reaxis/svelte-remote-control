@@ -88,7 +88,7 @@ describe('WebRTCConnection', () => {
 		const conn = new WebRTCConnection();
 		await conn.acceptOffer('host-peer-id');
 		expect(conn.status).toBe('connected');
-		expect(conn.role).toBe('guest');
+		expect(conn.role).toBe('client');
 		expect(conn.connectedPeers).toContain('host-peer-id');
 	});
 

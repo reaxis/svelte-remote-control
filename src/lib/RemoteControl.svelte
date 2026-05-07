@@ -34,7 +34,7 @@
 
 	interface Props {
 		/**
-		 * Path guests should be sent to (e.g. `"/remote"`). Defaults to the
+		 * Path clients should be sent to (e.g. `"/remote"`). Defaults to the
 		 * current page path (same route + `?id=`).
 		 */
 		remoteHref?: string;
@@ -45,8 +45,8 @@
 	const isBrowser = typeof window !== 'undefined';
 
 	// Detect role from URL on component mount.
-	const guestId = $derived(isBrowser ? new URLSearchParams(window.location.search).get('id') : null);
-	const isGuest = $derived(guestId !== null ? connection.role !== 'host' : connection.role === 'guest');
+	const clientId = $derived(isBrowser ? new URLSearchParams(window.location.search).get('id') : null);
+	const isClient = $derived(clientId !== null ? connection.role !== 'host' : connection.role === 'client');
 
 	const myConn = connection;
 
@@ -56,7 +56,7 @@
 	let copied = $state(false);
 	let copiedUrl = $state(false);
 
-	// ── Guest state ─────────────────────────────────────────────────────────
+	// ── Client state ────────────────────────────────────────────────────────
 	let peerIdInput = $state('');
 	let popoverEl = $state<HTMLElement | null>(null);
 	let popoverOpen = $state(false);
@@ -76,13 +76,13 @@
 	);
 
 	const remoteUrl = $derived(
-		!isGuest && myConn.localPeerId && isBrowser
+		!isClient && myConn.localPeerId && isBrowser
 			? `${window.location.origin}${basePath}?id=${myConn.localPeerId}`
 			: ''
 	);
 
 	const hostUrl = $derived(
-		isGuest && myConn.status === 'connected' && myConn.connectedPeers[0] && isBrowser
+		isClient && myConn.status === 'connected' && myConn.connectedPeers[0] && isBrowser
 			? `${window.location.origin}${basePath}?id=${myConn.connectedPeers[0]}`
 			: ''
 	);
@@ -90,7 +90,7 @@
 	// ── Lifecycle ────────────────────────────────────────────────────────────
 
 	$effect(() => {
-		if (guestId) connect(guestId);
+		if (clientId) connect(clientId);
 		else startOffer();
 		return () => myConn.destroy();
 	});
@@ -110,10 +110,10 @@
 		else if (!popoverOpen && isOpen) popoverEl.hidePopover();
 	});
 
-	// Guest flow: auto-open while connecting, auto-close once connected.
+	// Client flow: auto-open while connecting, auto-close once connected.
 	// The user can still manually reopen via the trigger button at any time.
 	$effect(() => {
-		if (!isGuest) return;
+		if (!isClient) return;
 		if (myConn.status === 'gathering') popoverOpen = true;
 		else if (myConn.status === 'connected') popoverOpen = false;
 	});
@@ -183,7 +183,7 @@
 		setTimeout(() => (copiedUrl = false), 2000);
 	}
 
-	// ── Guest functions ──────────────────────────────────────────────────────
+	// ── Client functions ─────────────────────────────────────────────────────
 
 	async function connect(id = peerIdInput.trim()) {
 		retryPeerId = id;
@@ -226,7 +226,7 @@
 			<span class="trigger-spinner"></span>
 		{:else if myConn.status === 'connected'}
 			<span class="trigger-dot connected"></span>
-			{#if isGuest}
+			{#if isClient}
 				<span class="trigger-role">CLIENT</span>
 				<span class="trigger-label">…{shortId(myConn.localPeerId)}</span>
 			{:else}
@@ -255,13 +255,13 @@
 	>
 		<div class="conn-header">
 			<h2>Remote Control</h2>
-			{#if isGuest && myConn.status === 'connected'}
+			{#if isClient && myConn.status === 'connected'}
 				<button class="btn secondary btn-sm" onclick={disconnect}>Disconnect</button>
 			{/if}
 		</div>
 
-		{#if isGuest}
-			<!-- ── Guest mode ── -->
+		{#if isClient}
+			<!-- ── Client mode ── -->
 			{#if myConn.status === 'gathering'}
 				<p class="hint">Connecting…</p>
 				<div class="spinner"></div>
@@ -315,7 +315,7 @@
 				<button class="btn secondary" onclick={copyUrl}>{copiedUrl ? 'Copied!' : 'Copy URL'}</button>
 
 				{#if myConn.status === 'awaiting'}
-					<p class="hint">Waiting for a guest to connect…</p>
+					<p class="hint">Waiting for a client to connect…</p>
 					<hr class="divider" />
 					<p class="hint">Or connect to a peer by ID:</p>
 					<input class="peer-input" type="text" placeholder="Paste peer ID…" bind:value={peerIdInput} />
