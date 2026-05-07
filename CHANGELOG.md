@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- `RemoteControl.svelte` no longer depends on `$app/*` (SvelteKit). Works in
+  any Svelte 5 project. `remoteHref` prop is now `string` instead of `AppRoute`.
+- Removed `@sveltejs/kit` from `peerDependencies`.
+
 ## [0.1.0] - 2026-05-06
 
 ### Added

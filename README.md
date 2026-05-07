@@ -11,7 +11,7 @@ Built on [PeerJS](https://peerjs.com) for WebRTC transport, Svelte 5 runes for r
 - **Media calls** — stream camera or microphone between peers with `startCall()` / `onCall()`.
 - **Synced reactive state** — `rcState()` returns a `$state`-like object whose value automatically syncs across all connected peers (last-write-wins).
 - **Auto-reconnect** — exponential backoff on connection loss, preserving the peer ID across session reloads.
-- **Typed routing** — the `remoteHref` prop is typed against SvelteKit's generated route union.
+- **Framework-independent** — no SvelteKit dependency; works in any Svelte 5 app (SvelteKit, Vite, etc.).
 - **No signalling server required** — uses the free public PeerJS broker by default; bring your own via the class API.
 
 ## Installation
@@ -76,7 +76,7 @@ Renders a small floating status trigger (top-right by default) with a popover co
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `remoteHref` | `AppRoute` (SvelteKit route) | current page | Route that guests should be sent to. Omit for same-route connections (useful for peer-to-peer symmetric apps); set to a `/remote` route when the host and guest interfaces differ. |
+| `remoteHref` | `string` | current page path | Path guests should be sent to (e.g. `"/remote"`). Omit for same-route connections (useful for peer-to-peer symmetric apps); set when host and guest interfaces are on different routes. |
 
 The component auto-detects its role from the URL: if `?id=…` is present, it acts as a guest and joins that peer ID; otherwise, it acts as a host and advertises its own ID.
 
@@ -251,7 +251,7 @@ const conn = new WebRTCConnection({
 
 ## Requirements
 
-- Svelte 5.0 or newer (uses runes).
+- Svelte 5.0 or newer (uses runes). Works with SvelteKit, plain Vite + Svelte, or any other build setup.
 - A browser with WebRTC support (all modern evergreen browsers).
 - HTTPS or `localhost` for `getUserMedia` in media calls.
 

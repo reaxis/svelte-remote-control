@@ -29,27 +29,23 @@
 </script>
 
 <script lang="ts">
-	import { page } from '$app/state';
-	import { resolve } from '$app/paths';
-	import { browser } from '$app/environment';
 	import QRCode from 'qrcode';
 	import { connection } from './rcState.svelte.js';
 
-	type AppRoute = Parameters<typeof resolve>[0];
-
 	interface Props {
 		/**
-		 * Where guests should be sent. Must be a valid app route (typed against
-		 * SvelteKit's generated route union). Defaults to the current page URL
-		 * (same route + `?id=`).
+		 * Path guests should be sent to (e.g. `"/remote"`). Defaults to the
+		 * current page path (same route + `?id=`).
 		 */
-		remoteHref?: AppRoute;
+		remoteHref?: string;
 	}
 
 	let { remoteHref }: Props = $props();
 
-	// Detect role from URL; reactive so client-side navigation is handled correctly.
-	const guestId = $derived(browser ? page.url.searchParams.get('id') : null);
+	const isBrowser = typeof window !== 'undefined';
+
+	// Detect role from URL on component mount.
+	const guestId = $derived(isBrowser ? new URLSearchParams(window.location.search).get('id') : null);
 	const isGuest = $derived(guestId !== null || connection.role === 'guest');
 
 	const myConn = connection;
@@ -76,17 +72,17 @@
 	// only re-run when the string actually changes.
 
 	const basePath = $derived(
-		browser ? (remoteHref ? resolve(remoteHref) : window.location.pathname).replace(/\/?$/, '/') : '/'
+		isBrowser ? (remoteHref ?? window.location.pathname).replace(/\/?$/, '/') : '/'
 	);
 
 	const remoteUrl = $derived(
-		!isGuest && myConn.localPeerId && browser
+		!isGuest && myConn.localPeerId && isBrowser
 			? `${window.location.origin}${basePath}?id=${myConn.localPeerId}`
 			: ''
 	);
 
 	const hostUrl = $derived(
-		isGuest && myConn.status === 'connected' && myConn.connectedPeers[0] && browser
+		isGuest && myConn.status === 'connected' && myConn.connectedPeers[0] && isBrowser
 			? `${window.location.origin}${basePath}?id=${myConn.connectedPeers[0]}`
 			: ''
 	);

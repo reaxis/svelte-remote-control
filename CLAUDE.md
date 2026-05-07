@@ -16,13 +16,13 @@ This folder is a self-contained WebRTC connection primitive (`svelte-remote-cont
 |---|---|---|
 | `webrtc.svelte.ts` | `WebRTCConnection` class: PeerJS transport + reactive `$state` fields for status/peers. | `peerjs`, Svelte 5 runes |
 | `rcState.svelte.ts` | Module-level singleton `connection`, `__sync` wiring, public functional API (`send`, `onMessage`, `onCall`, `makeCall`, `startCall`, `rcState`, `deleteRcState`, `connStatus`). | `webrtc.svelte.ts` |
-| `RemoteControl.svelte` | UI (QR + popover status). Re-exports the full public API through `<script module>`. | `rcState.svelte.ts`, `qrcode`, `$app/paths`, `$app/state`, `$app/environment` |
+| `RemoteControl.svelte` | UI (QR + popover status). Re-exports the full public API through `<script module>`. | `rcState.svelte.ts`, `qrcode` |
 | `index.ts` | Package entry point — re-exports full public API (preferred consumer import path). | `RemoteControl.svelte`, `rcState.svelte.ts`, `webrtc.svelte.ts` |
 | `rcState.test.ts` | Tests for `rcState` LWW semantics, storage, validators. | vitest, jsdom |
 | `webrtc.test.ts` | Tests for `WebRTCConnection` state machine. | vitest, jsdom |
 | `README.md` | Consumer-facing package documentation. |  |
 
-**Import rule:** `webrtc.svelte.ts` must not import SvelteKit or any UI dependencies. `rcState.svelte.ts` must not import SvelteKit. Only `RemoteControl.svelte` is allowed to touch `$app/*` — this is the future extraction boundary.
+**Import rule:** No file in `src/lib/` may import from `$app/*` or any SvelteKit-specific module. All three library files are SvelteKit-independent.
 
 ---
 
@@ -49,7 +49,7 @@ Note: `RemoteControl.svelte`'s `<script module>` still re-exports the API for ba
 
 ## Key Architecture Decisions
 
-- **Three-file split** is deliberate: the class (transport) has zero SvelteKit deps; the singleton module (wiring + reactive sync helpers) has zero SvelteKit deps; only the UI component imports `$app/*`. This keeps the extraction path clean.
+- **Three-file split** is deliberate: all three files have zero SvelteKit deps. The library works in any Svelte 5 project — SvelteKit, plain Vite + Svelte, etc. `isBrowser = typeof window !== 'undefined'` guards SSR paths in `RemoteControl.svelte` instead of the former `browser` from `$app/environment`.
 - **Singleton + class, both exported.** The singleton (`connection` in `rcState.svelte.ts`) covers the common case. `WebRTCConnection` is exported as a class for apps that need multiple independent connections.
 - **Message types stay flexible, not strongly generic.** `send()` and `onMessage()` use `{ type: string; [k: string]: unknown }`. A generic `createChannel<T>()` was considered and deliberately rejected — flexibility is valued over compile-time message typing.
 - **`rcState` is last-write-wins (LWW)**, no causal ordering. Documented in the module docstring and README. Suitable for UI state, not counters/carts.
@@ -75,16 +75,16 @@ Note: `RemoteControl.svelte`'s `<script module>` still re-exports the API for ba
 - **Media calls are tracked** in `#mediaCalls: Set<MediaConnection>`. `#cleanup` closes them explicitly — don't rely on `peer.destroy()` cascading.
 - **PeerJS statically imports `@mediapipe/pose` internals even when unused.** This is the host project's problem; handled via Vite `optimizeDeps` exclusion + stub alias in the project root. Not a library concern unless you add BlazePose.
 - **`sessionStorage` is guarded** at module init (`typeof sessionStorage !== 'undefined'`) because a future SSR context might load this module before `window` exists. Don't remove the guard.
-- **`remoteHref` is typed `AppRoute`** (SvelteKit's generated route union). This is the single SvelteKit coupling point. When extracting to a standalone package, this prop must become `string` again and the `$app/paths` imports need to be replaced with a `basePath` prop.
+- **`remoteHref` is typed `string`**. Previously typed as `AppRoute` (SvelteKit's route union) but decoupled — consumers pass a plain path string like `"/remote"`.
 - **Writing large Svelte files via shell heredoc fails** when content contains backticks. Use `create_file` or edit via tool calls.
 
 ---
 
-## Extraction Checklist (when publishing as a package)
+## Publishing checklist
 
-These steps are already done — the package is ready to publish:
+The package is ready to publish:
 - `package.json` has `"exports"`, `"svelte"`, `"types"` fields (correct).
-- Peer deps: `svelte`, `peerjs`, `qrcode`, `@sveltejs/kit` (all declared).
+- Peer deps: `svelte`, `peerjs`, `qrcode` (no `@sveltejs/kit` needed — fully decoupled).
 - `src/lib/index.ts` is the single entry point.
 - `npm run prepack` builds `dist/` cleanly with `publint` passing.
 
@@ -101,7 +101,6 @@ Remaining before `npm publish`:
 |---|---|---|
 | `peerjs` | peerDep + devDep | WebRTC data + media connections |
 | `qrcode` | peerDep + devDep | QR code generation for peer ID URL |
-| `@sveltejs/kit` | peerDep | SvelteKit `$app/*` imports in `RemoteControl.svelte` |
 | `svelte` ≥ 5 | peerDep + devDep | Runes (`$state`, `$derived`, `$effect`) |
 | `@types/qrcode` | devDep | TypeScript types |
 | `vitest`, `@vitest/ui`, `jsdom` | devDep | Test runner + environment |
