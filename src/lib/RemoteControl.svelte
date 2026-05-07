@@ -95,6 +95,10 @@
 		return () => myConn.destroy();
 	});
 
+	$effect(() => myConn.onMessage((msg) => {
+		if (msg.type === '__kick') disconnect();
+	}));
+
 	// Popover open/close as a single source of truth. The effect syncs state
 	// → DOM (idempotent — checks current popover state first), and `ontoggle`
 	// on the popover element syncs DOM → state (captures manual user dismiss
@@ -272,7 +276,7 @@
 				{/if}
 				<p class="peer-label">Host</p>
 				<code class="peer-id">{myConn.connectedPeers[0]}</code>
-				<button class="btn secondary" onclick={copyHostId}>{copiedHostId ? 'Copied!' : 'Copy ID'}</button>
+				<button class="btn secondary" onclick={copyHostId}>{copiedHostId ? 'Copied!' : 'Copy host ID'}</button>
 				<code class="peer-id url">{hostUrl}</code>
 				<button class="btn secondary" onclick={copyHostUrl}>{copiedHostUrl ? 'Copied!' : 'Copy URL'}</button>
 
@@ -322,7 +326,10 @@
 						<span class="remotes-label">Connected clients</span>
 						<ul class="remotes-list">
 							{#each myConn.connectedPeers as id (id)}
-								<li title={id}>…{shortId(id)}</li>
+								<li title={id}>
+									<span>…{shortId(id)}</span>
+									<button class="btn-kick" onclick={() => myConn.kick(id)} aria-label="Disconnect {id}">✕</button>
+								</li>
 							{/each}
 						</ul>
 					</div>
@@ -518,13 +525,31 @@
 	}
 
 	.remotes-list li {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
 		font-family: monospace;
 		font-size: 0.8rem;
 		background: #e8f4e8;
 		color: #155724;
 		border-radius: 4px;
-		padding: 0.2rem 0.5rem;
+		padding: 0.2rem 0.35rem 0.2rem 0.5rem;
 	}
+
+	.btn-kick {
+		background: none;
+		border: none;
+		cursor: pointer;
+		color: #155724;
+		font-size: 0.7rem;
+		line-height: 1;
+		padding: 0.1rem 0.15rem;
+		border-radius: 3px;
+		opacity: 0.5;
+		transition: opacity 0.1s;
+	}
+
+	.btn-kick:hover { opacity: 1; }
 
 	.status-badge {
 		display: inline-block;

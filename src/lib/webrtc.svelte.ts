@@ -177,6 +177,12 @@ export class WebRTCConnection<TMessage extends { type: string } = { type: string
 		return () => this.#callHandlers.delete(handler);
 	}
 
+	kick(peerId: string): void {
+		const dc = this.#connections.get(peerId);
+		if (!dc) return;
+		dc.send({ type: '__kick' } as TMessage);
+	}
+
 	destroy(): void {
 		this.#cleanup();
 		this.status = 'idle';
