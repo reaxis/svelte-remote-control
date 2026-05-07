@@ -16,33 +16,40 @@ This folder is a self-contained WebRTC connection primitive (`svelte-remote-cont
 |---|---|---|
 | `webrtc.svelte.ts` | `WebRTCConnection` class: PeerJS transport + reactive `$state` fields for status/peers. | `peerjs`, Svelte 5 runes |
 | `rcState.svelte.ts` | Module-level singleton `connection`, `__sync` wiring, public functional API (`send`, `onMessage`, `onCall`, `makeCall`, `startCall`, `rcState`, `deleteRcState`, `connStatus`). | `webrtc.svelte.ts` |
-| `RemoteControl.svelte` | UI (QR + popover status). Re-exports the full public API through `<script module>`. | `rcState.svelte.ts`, `qrcode`, `$app/paths`, `$app/state`, `$app/environment` |
+| `RemoteControl.svelte` | UI (QR + popover status). Re-exports the full public API through `<script module>`. | `rcState.svelte.ts`, `qrcode` |
+| `index.ts` | Package entry point — re-exports full public API (preferred consumer import path). | `RemoteControl.svelte`, `rcState.svelte.ts`, `webrtc.svelte.ts` |
+| `rcState.test.ts` | Tests for `rcState` LWW semantics, storage, validators. | vitest, jsdom |
+| `webrtc.test.ts` | Tests for `WebRTCConnection` state machine. | vitest, jsdom |
 | `README.md` | Consumer-facing package documentation. |  |
 
-**Import rule:** `webrtc.svelte.ts` must not import SvelteKit or any UI dependencies. `rcState.svelte.ts` must not import SvelteKit. Only `RemoteControl.svelte` is allowed to touch `$app/*` — this is the future extraction boundary.
+**Import rule:** No file in `src/lib/` may import from `$app/*` or any SvelteKit-specific module. All three library files are SvelteKit-independent.
 
 ---
 
 ## Public API Surface
 
-All of these are re-exported from `RemoteControl.svelte` so consumers write a single import:
+All of these are exported from `src/lib/index.ts` (the canonical package entry point):
 
 ```ts
 import RemoteControl, {
     rcState, deleteRcState, connStatus,
     send, onMessage,
     makeCall, startCall, onCall,
-    WebRTCConnection, // class, for advanced/multi-instance use
+    connection,           // raw singleton WebRTCConnection instance
+    WebRTCConnection,     // class, for advanced/multi-instance use
+    DEFAULT_ICE_SERVERS,
 } from 'svelte-remote-control';
 ```
 
-`WebRTCConnection` and `ConnectionStatus` are also exported for consumers who want the bare class without the singleton or UI.
+`WebRTCConnection`, `ConnectionStatus`, `PeerServerOptions`, and `WebRTCConnectionOptions` are also exported for consumers who want the bare class without the singleton or UI.
+
+Note: `RemoteControl.svelte`'s `<script module>` still re-exports the API for backwards compatibility, but `index.ts` is the authoritative entry point. Consumers using `import ... from 'svelte-remote-control'` get a default export (the component) plus all named exports.
 
 ---
 
 ## Key Architecture Decisions
 
-- **Three-file split** is deliberate: the class (transport) has zero SvelteKit deps; the singleton module (wiring + reactive sync helpers) has zero SvelteKit deps; only the UI component imports `$app/*`. This keeps the extraction path clean.
+- **Three-file split** is deliberate: all three files have zero SvelteKit deps. The library works in any Svelte 5 project — SvelteKit, plain Vite + Svelte, etc. `isBrowser = typeof window !== 'undefined'` guards SSR paths in `RemoteControl.svelte` instead of the former `browser` from `$app/environment`.
 - **Singleton + class, both exported.** The singleton (`connection` in `rcState.svelte.ts`) covers the common case. `WebRTCConnection` is exported as a class for apps that need multiple independent connections.
 - **Message types stay flexible, not strongly generic.** `send()` and `onMessage()` use `{ type: string; [k: string]: unknown }`. A generic `createChannel<T>()` was considered and deliberately rejected — flexibility is valued over compile-time message typing.
 - **`rcState` is last-write-wins (LWW)**, no causal ordering. Documented in the module docstring and README. Suitable for UI state, not counters/carts.
@@ -54,6 +61,11 @@ import RemoteControl, {
 - **Reactive UI URLs** in `RemoteControl.svelte` use `$derived` (not `$state` + effect) so `QRCode.toDataURL()` only re-runs when the URL string identity actually changes. A `cancelled` flag on the generation effect prevents stale promises from overwriting newer QRs.
 - **Popover state** uses a single `popoverOpen` $state with a DOM-sync `$effect` (idempotent, guards with `:popover-open`) plus an `ontoggle` handler to capture manual dismiss. No imperative `showPopover()` / `hidePopover()` scattered through lifecycle code.
 - **Retry uses reactive `retryAttempt`** (`$state`). The retry `$effect` depends on it explicitly, so increments deterministically schedule the next attempt instead of relying on status-transition coincidence.
+- **`WebRTCConnection` constructor accepts an options object or a legacy `RTCIceServer[]` array.** `new WebRTCConnection({ iceServers, peerServer })` or the old `new WebRTCConnection(iceServersArray)` both work. `peerServer` is spread into the PeerJS constructor config, enabling custom brokers (host/port/path/secure/key). The array form is preserved for backwards compat.
+- **`__kick` is a system message for bidirectional disconnect.** `WebRTCConnection.kick(peerId)` sends `{ type: '__kick' }` to the target peer — it does NOT close the DataConnection itself. The receiver calls `disconnect()` (stops retry, transitions to host mode). This same path handles both host-initiated kicks and client-initiated disconnects (the client's "Disconnect" button calls `disconnect()` directly; the host's kick button sends `__kick` and the client calls `disconnect()` in response). Consumer message types must not use `__`-prefixed type strings.
+- **`isGuest` respects `role === 'host'`.** Derived as `guestId !== null ? role !== 'host' : role === 'guest'`. A URL guest (`guestId` set) remains in guest mode only while `role` is not `'host'`. Once `disconnect()` calls `startOffer()` and `role` becomes `'host'` (set synchronously inside `createOffer()`), `isGuest` flips to `false` immediately — no separate flag needed.
+- **`disconnect()` transitions the client back to host mode** by calling `stopRetry()` then `startOffer()`. It is the single exit path for clients, whether triggered by the "Disconnect" button or an incoming `__kick` message.
+- **Popover auto-opens only during `'gathering'`, not `'idle'`.** The `idle` status is ambiguous — it means both "never connected" and "just destroyed". Auto-opening on `idle` caused the popover to hang in "Connecting…" after disconnect. The `idle && retryPeerId` combination in the guest template is used to detect the post-disconnect case and show a "Disconnected" state instead.
 
 ---
 
@@ -67,28 +79,51 @@ import RemoteControl, {
 - **Media calls are tracked** in `#mediaCalls: Set<MediaConnection>`. `#cleanup` closes them explicitly — don't rely on `peer.destroy()` cascading.
 - **PeerJS statically imports `@mediapipe/pose` internals even when unused.** This is the host project's problem; handled via Vite `optimizeDeps` exclusion + stub alias in the project root. Not a library concern unless you add BlazePose.
 - **`sessionStorage` is guarded** at module init (`typeof sessionStorage !== 'undefined'`) because a future SSR context might load this module before `window` exists. Don't remove the guard.
-- **`remoteHref` is typed `AppRoute`** (SvelteKit's generated route union). This is the single SvelteKit coupling point. When extracting to a standalone package, this prop must become `string` again and the `$app/paths` imports need to be replaced with a `basePath` prop.
+- **`remoteHref` is typed `string`**. Previously typed as `AppRoute` (SvelteKit's route union) but decoupled — consumers pass a plain path string like `"/remote"`.
 - **Writing large Svelte files via shell heredoc fails** when content contains backticks. Use `create_file` or edit via tool calls.
+- **`kick()` only signals — it does not close the DataConnection.** If the remote peer does not handle `__kick` (e.g. a non-`RemoteControl` client), the connection stays open. Don't add `dc.close()` back to `kick()` without reconsidering the whole disconnect flow.
 
 ---
 
-## Extraction Checklist (when publishing as a package)
+## Publishing checklist
 
-1. Move `$app/*` imports out of `RemoteControl.svelte` — accept `basePath: string` and `currentPath: string` as props instead, with a thin SvelteKit wrapper in consuming projects.
-2. Change `remoteHref: AppRoute` → `remoteHref: string`.
-3. Add `package.json` with `"exports"`, `"svelte"`, `"types"` fields. Peer-dep `svelte`, `peerjs`, `qrcode`.
-4. Add `svelte-package` build config.
+The package is ready to publish:
+- `package.json` has `"exports"`, `"svelte"`, `"types"` fields (correct).
+- Peer deps: `svelte`, `peerjs`, `qrcode` (no `@sveltejs/kit` needed — fully decoupled).
+- `src/lib/index.ts` is the single entry point.
+- `npm run prepack` builds `dist/` cleanly with `publint` passing.
+
+Remaining before `npm publish`:
+1. Set `repository` and `homepage` in `package.json` once the git remote is set.
+2. Tag `v0.1.0`.
+3. Run `npm publish --access public`.
 
 ---
 
 ## Dependencies
 
-| Package | Purpose |
-|---|---|
-| `peerjs` | WebRTC data + media connections |
-| `qrcode` | QR code generation for peer ID URL |
-| `@types/qrcode` | TypeScript types (dev dep) |
-| `svelte` ≥ 5 | Runes (`$state`, `$derived`, `$effect`) |
+| Package | Where | Purpose |
+|---|---|---|
+| `peerjs` | peerDep + devDep | WebRTC data + media connections |
+| `qrcode` | peerDep + devDep | QR code generation for peer ID URL |
+| `svelte` ≥ 5 | peerDep + devDep | Runes (`$state`, `$derived`, `$effect`) |
+| `@types/qrcode` | devDep | TypeScript types |
+| `vitest`, `@vitest/ui`, `jsdom` | devDep | Test runner + environment |
+
+---
+
+## Testing
+
+Run tests: `npm test`  
+Watch mode: `npm run test:watch`
+
+Tests live in `src/lib/`:
+- `webrtc.test.ts` — mocks `peerjs` via `vi.mock`; tests `WebRTCConnection` state machine.
+- `rcState.test.ts` — mocks `./webrtc.svelte.js` via `vi.mock` + `vi.hoisted`; tests `rcState` LWW semantics, storage, and validators.
+
+**Gotcha:** The `vi.mock` factory runs before variable declarations, so mock state (e.g. captured handlers) must be created via `vi.hoisted()`. Using arrow functions in `vi.fn(...)` for constructors doesn't work — use `vi.fn(function() { return obj; })`.
+
+**Gotcha:** The `@sveltejs/vite-plugin-svelte` plugin is required in `vitest.config.ts` so that `.svelte.ts` runes (`$state`, etc.) are compiled correctly in tests.
 
 ---
 

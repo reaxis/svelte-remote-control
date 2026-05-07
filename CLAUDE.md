@@ -62,6 +62,10 @@ Note: `RemoteControl.svelte`'s `<script module>` still re-exports the API for ba
 - **Popover state** uses a single `popoverOpen` $state with a DOM-sync `$effect` (idempotent, guards with `:popover-open`) plus an `ontoggle` handler to capture manual dismiss. No imperative `showPopover()` / `hidePopover()` scattered through lifecycle code.
 - **Retry uses reactive `retryAttempt`** (`$state`). The retry `$effect` depends on it explicitly, so increments deterministically schedule the next attempt instead of relying on status-transition coincidence.
 - **`WebRTCConnection` constructor accepts an options object or a legacy `RTCIceServer[]` array.** `new WebRTCConnection({ iceServers, peerServer })` or the old `new WebRTCConnection(iceServersArray)` both work. `peerServer` is spread into the PeerJS constructor config, enabling custom brokers (host/port/path/secure/key). The array form is preserved for backwards compat.
+- **`__kick` is a system message for bidirectional disconnect.** `WebRTCConnection.kick(peerId)` sends `{ type: '__kick' }` to the target peer — it does NOT close the DataConnection itself. The receiver calls `disconnect()` (stops retry, transitions to host mode). This same path handles both host-initiated kicks and client-initiated disconnects (the client's "Disconnect" button calls `disconnect()` directly; the host's kick button sends `__kick` and the client calls `disconnect()` in response). Consumer message types must not use `__`-prefixed type strings.
+- **`isGuest` respects `role === 'host'`.** Derived as `guestId !== null ? role !== 'host' : role === 'guest'`. A URL guest (`guestId` set) remains in guest mode only while `role` is not `'host'`. Once `disconnect()` calls `startOffer()` and `role` becomes `'host'` (set synchronously inside `createOffer()`), `isGuest` flips to `false` immediately — no separate flag needed.
+- **`disconnect()` transitions the client back to host mode** by calling `stopRetry()` then `startOffer()`. It is the single exit path for clients, whether triggered by the "Disconnect" button or an incoming `__kick` message.
+- **Popover auto-opens only during `'gathering'`, not `'idle'`.** The `idle` status is ambiguous — it means both "never connected" and "just destroyed". Auto-opening on `idle` caused the popover to hang in "Connecting…" after disconnect. The `idle && retryPeerId` combination in the guest template is used to detect the post-disconnect case and show a "Disconnected" state instead.
 
 ---
 
@@ -77,6 +81,7 @@ Note: `RemoteControl.svelte`'s `<script module>` still re-exports the API for ba
 - **`sessionStorage` is guarded** at module init (`typeof sessionStorage !== 'undefined'`) because a future SSR context might load this module before `window` exists. Don't remove the guard.
 - **`remoteHref` is typed `string`**. Previously typed as `AppRoute` (SvelteKit's route union) but decoupled — consumers pass a plain path string like `"/remote"`.
 - **Writing large Svelte files via shell heredoc fails** when content contains backticks. Use `create_file` or edit via tool calls.
+- **`kick()` only signals — it does not close the DataConnection.** If the remote peer does not handle `__kick` (e.g. a non-`RemoteControl` client), the connection stays open. Don't add `dc.close()` back to `kick()` without reconsidering the whole disconnect flow.
 
 ---
 
