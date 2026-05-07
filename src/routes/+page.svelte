@@ -5,10 +5,10 @@
 	const hue = rcState('hue', 180);
 </script>
 
-<RemoteControl remoteHref="/remote" />
+<RemoteControl />
 
 <main>
-	<h1>Remote Control Demo</h1>
+	<h1>@reaxis/svelte-remote-control demo</h1>
 	<p class="hint">Open this page on another device (scan the QR in the top-right) to see state sync in action.</p>
 
 	<div class="sliders">
