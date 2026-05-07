@@ -16,6 +16,19 @@ export type ConnectionStatus =
 	| 'disconnected'
 	| 'error';
 
+export type PeerServerOptions = {
+	host?: string;
+	port?: number;
+	path?: string;
+	secure?: boolean;
+	key?: string;
+};
+
+export type WebRTCConnectionOptions = {
+	iceServers?: RTCIceServer[];
+	peerServer?: PeerServerOptions;
+};
+
 export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
 	{ urls: 'stun:stun.l.google.com:19302' },
 	{ urls: 'stun:stun1.l.google.com:19302' },
@@ -36,9 +49,16 @@ export class WebRTCConnection<TMessage extends { type: string } = { type: string
 	#connectHandlers = new Set<(peerId: string) => void>();
 	#callHandlers = new Set<(stream: MediaStream) => void>();
 	#iceServers: RTCIceServer[];
+	#peerServer: PeerServerOptions | undefined;
 
-	constructor(iceServers: RTCIceServer[] = DEFAULT_ICE_SERVERS) {
-		this.#iceServers = iceServers;
+	constructor(options?: RTCIceServer[] | WebRTCConnectionOptions) {
+		if (Array.isArray(options)) {
+			this.#iceServers = options;
+			this.#peerServer = undefined;
+		} else {
+			this.#iceServers = options?.iceServers ?? DEFAULT_ICE_SERVERS;
+			this.#peerServer = options?.peerServer;
+		}
 	}
 
 	async createOffer(preferredId?: string): Promise<string> {
@@ -167,9 +187,10 @@ export class WebRTCConnection<TMessage extends { type: string } = { type: string
 
 	async #createPeer(peerId?: string): Promise<Peer> {
 		const { Peer: PeerClass } = await import('peerjs');
+		const peerConfig = { config: { iceServers: this.#iceServers }, ...(this.#peerServer ?? {}) };
 		const peer = peerId
-			? new PeerClass(peerId, { config: { iceServers: this.#iceServers } })
-			: new PeerClass({ config: { iceServers: this.#iceServers } });
+			? new PeerClass(peerId, peerConfig)
+			: new PeerClass(peerConfig);
 		this.#peer = peer;
 
 		await new Promise<void>((resolve, reject) => {

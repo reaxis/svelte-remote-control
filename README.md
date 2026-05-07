@@ -233,6 +233,15 @@ const conn = new WebRTCConnection([
 ]);
 ```
 
+Pass a custom PeerJS broker (e.g. a self-hosted [peerjs-server](https://github.com/peers/peerjs-server)) alongside optional ICE servers:
+
+```ts
+const conn = new WebRTCConnection({
+    iceServers: [{ urls: 'turn:my-turn.example.com', username: 'u', credential: 'c' }],
+    peerServer: { host: 'my-peer.example.com', port: 9000, path: '/myapp', secure: true },
+});
+```
+
 ## How it works
 
 - **Signalling** uses the free public [PeerJS broker](https://peerjs.com/peerserver). No server setup required. The host publishes a random peer ID, the guest scans/enters it to establish a WebRTC connection. After that, all traffic is peer-to-peer.
@@ -245,6 +254,25 @@ const conn = new WebRTCConnection([
 - Svelte 5.0 or newer (uses runes).
 - A browser with WebRTC support (all modern evergreen browsers).
 - HTTPS or `localhost` for `getUserMedia` in media calls.
+
+## Security considerations
+
+- Messages are **not authenticated**. Any peer that knows the ID can connect and send arbitrary payloads. The peer ID serves as a capability token — treat it like a share-link.
+- For privileged operations, implement an application-level handshake using `__sync` or a custom message type with a shared secret exchanged out-of-band (e.g. via the QR code).
+- WebRTC itself encrypts all traffic (DTLS for data, SRTP for media), so payloads are private in transit.
+- `getUserMedia()` requires HTTPS or `localhost`.
+
+## Troubleshooting
+
+- **"Connected" status but video never appears** — check that the host calls `onCall()` before the guest calls `startCall()`. If the stream event fires before the handler registers, the first stream is missed.
+- **Peers connect on desktop but not on phone** — WebRTC requires HTTPS on non-localhost origins. Serve your app over HTTPS (e.g. `ngrok`, Cloudflare Tunnel, or a TLS cert).
+- **Connection drops behind restrictive NAT / corporate firewalls** — the default STUN servers are insufficient. Provide TURN servers via `new WebRTCConnection({ iceServers: [...] })`.
+- **QR code scans, app opens, but never connects** — the phone's PeerJS client can't reach the signalling broker. Usually a corporate captive portal. Switch networks or host your own PeerJS server.
+- **iOS Safari: audio doesn't play** — autoplay is blocked without a user gesture. Require a "Start" button tap before calling `startCall()`.
+
+## Development playground
+
+Run `npm run dev` to open the playground. The home route (`/`) acts as the host pane; scan the QR code with a phone (or open `/remote?id=…` in a second tab) to connect as a guest.
 
 ## License
 

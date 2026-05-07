@@ -17,6 +17,9 @@ This folder is a self-contained WebRTC connection primitive (`svelte-remote-cont
 | `webrtc.svelte.ts` | `WebRTCConnection` class: PeerJS transport + reactive `$state` fields for status/peers. | `peerjs`, Svelte 5 runes |
 | `rcState.svelte.ts` | Module-level singleton `connection`, `__sync` wiring, public functional API (`send`, `onMessage`, `onCall`, `makeCall`, `startCall`, `rcState`, `deleteRcState`, `connStatus`). | `webrtc.svelte.ts` |
 | `RemoteControl.svelte` | UI (QR + popover status). Re-exports the full public API through `<script module>`. | `rcState.svelte.ts`, `qrcode`, `$app/paths`, `$app/state`, `$app/environment` |
+| `index.ts` | Package entry point — re-exports full public API (preferred consumer import path). | `RemoteControl.svelte`, `rcState.svelte.ts`, `webrtc.svelte.ts` |
+| `rcState.test.ts` | Tests for `rcState` LWW semantics, storage, validators. | vitest, jsdom |
+| `webrtc.test.ts` | Tests for `WebRTCConnection` state machine. | vitest, jsdom |
 | `README.md` | Consumer-facing package documentation. |  |
 
 **Import rule:** `webrtc.svelte.ts` must not import SvelteKit or any UI dependencies. `rcState.svelte.ts` must not import SvelteKit. Only `RemoteControl.svelte` is allowed to touch `$app/*` — this is the future extraction boundary.
@@ -25,18 +28,22 @@ This folder is a self-contained WebRTC connection primitive (`svelte-remote-cont
 
 ## Public API Surface
 
-All of these are re-exported from `RemoteControl.svelte` so consumers write a single import:
+All of these are exported from `src/lib/index.ts` (the canonical package entry point):
 
 ```ts
 import RemoteControl, {
     rcState, deleteRcState, connStatus,
     send, onMessage,
     makeCall, startCall, onCall,
-    WebRTCConnection, // class, for advanced/multi-instance use
+    connection,           // raw singleton WebRTCConnection instance
+    WebRTCConnection,     // class, for advanced/multi-instance use
+    DEFAULT_ICE_SERVERS,
 } from 'svelte-remote-control';
 ```
 
-`WebRTCConnection` and `ConnectionStatus` are also exported for consumers who want the bare class without the singleton or UI.
+`WebRTCConnection`, `ConnectionStatus`, `PeerServerOptions`, and `WebRTCConnectionOptions` are also exported for consumers who want the bare class without the singleton or UI.
+
+Note: `RemoteControl.svelte`'s `<script module>` still re-exports the API for backwards compatibility, but `index.ts` is the authoritative entry point. Consumers using `import ... from 'svelte-remote-control'` get a default export (the component) plus all named exports.
 
 ---
 
@@ -54,6 +61,7 @@ import RemoteControl, {
 - **Reactive UI URLs** in `RemoteControl.svelte` use `$derived` (not `$state` + effect) so `QRCode.toDataURL()` only re-runs when the URL string identity actually changes. A `cancelled` flag on the generation effect prevents stale promises from overwriting newer QRs.
 - **Popover state** uses a single `popoverOpen` $state with a DOM-sync `$effect` (idempotent, guards with `:popover-open`) plus an `ontoggle` handler to capture manual dismiss. No imperative `showPopover()` / `hidePopover()` scattered through lifecycle code.
 - **Retry uses reactive `retryAttempt`** (`$state`). The retry `$effect` depends on it explicitly, so increments deterministically schedule the next attempt instead of relying on status-transition coincidence.
+- **`WebRTCConnection` constructor accepts an options object or a legacy `RTCIceServer[]` array.** `new WebRTCConnection({ iceServers, peerServer })` or the old `new WebRTCConnection(iceServersArray)` both work. `peerServer` is spread into the PeerJS constructor config, enabling custom brokers (host/port/path/secure/key). The array form is preserved for backwards compat.
 
 ---
 
@@ -74,21 +82,44 @@ import RemoteControl, {
 
 ## Extraction Checklist (when publishing as a package)
 
-1. Move `$app/*` imports out of `RemoteControl.svelte` — accept `basePath: string` and `currentPath: string` as props instead, with a thin SvelteKit wrapper in consuming projects.
-2. Change `remoteHref: AppRoute` → `remoteHref: string`.
-3. Add `package.json` with `"exports"`, `"svelte"`, `"types"` fields. Peer-dep `svelte`, `peerjs`, `qrcode`.
-4. Add `svelte-package` build config.
+These steps are already done — the package is ready to publish:
+- `package.json` has `"exports"`, `"svelte"`, `"types"` fields (correct).
+- Peer deps: `svelte`, `peerjs`, `qrcode`, `@sveltejs/kit` (all declared).
+- `src/lib/index.ts` is the single entry point.
+- `npm run prepack` builds `dist/` cleanly with `publint` passing.
+
+Remaining before `npm publish`:
+1. Set `repository` and `homepage` in `package.json` once the git remote is set.
+2. Tag `v0.1.0`.
+3. Run `npm publish --access public`.
 
 ---
 
 ## Dependencies
 
-| Package | Purpose |
-|---|---|
-| `peerjs` | WebRTC data + media connections |
-| `qrcode` | QR code generation for peer ID URL |
-| `@types/qrcode` | TypeScript types (dev dep) |
-| `svelte` ≥ 5 | Runes (`$state`, `$derived`, `$effect`) |
+| Package | Where | Purpose |
+|---|---|---|
+| `peerjs` | peerDep + devDep | WebRTC data + media connections |
+| `qrcode` | peerDep + devDep | QR code generation for peer ID URL |
+| `@sveltejs/kit` | peerDep | SvelteKit `$app/*` imports in `RemoteControl.svelte` |
+| `svelte` ≥ 5 | peerDep + devDep | Runes (`$state`, `$derived`, `$effect`) |
+| `@types/qrcode` | devDep | TypeScript types |
+| `vitest`, `@vitest/ui`, `jsdom` | devDep | Test runner + environment |
+
+---
+
+## Testing
+
+Run tests: `npm test`  
+Watch mode: `npm run test:watch`
+
+Tests live in `src/lib/`:
+- `webrtc.test.ts` — mocks `peerjs` via `vi.mock`; tests `WebRTCConnection` state machine.
+- `rcState.test.ts` — mocks `./webrtc.svelte.js` via `vi.mock` + `vi.hoisted`; tests `rcState` LWW semantics, storage, and validators.
+
+**Gotcha:** The `vi.mock` factory runs before variable declarations, so mock state (e.g. captured handlers) must be created via `vi.hoisted()`. Using arrow functions in `vi.fn(...)` for constructors doesn't work — use `vi.fn(function() { return obj; })`.
+
+**Gotcha:** The `@sveltejs/vite-plugin-svelte` plugin is required in `vitest.config.ts` so that `.svelte.ts` runes (`$state`, etc.) are compiled correctly in tests.
 
 ---
 

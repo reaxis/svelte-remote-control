@@ -1,6 +1,17 @@
 {
 	"name": "svelte-remote-control",
-	"version": "0.0.1",
+	"version": "0.1.0",
+	"description": "Peer-to-peer WebRTC connection primitive for Svelte 5 with auto-QR, synced reactive state, and media calls.",
+	"keywords": [
+		"svelte",
+		"svelte5",
+		"webrtc",
+		"peerjs",
+		"peer-to-peer",
+		"qr-code",
+		"sveltekit"
+	],
+	"license": "MIT",
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build && npm run prepack",
@@ -8,7 +19,9 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"prepack": "svelte-kit sync && svelte-package && publint",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"test": "vitest run",
+		"test:watch": "vitest"
 	},
 	"files": [
 		"dist",
@@ -16,7 +29,9 @@
 		"!dist/**/*.spec.*"
 	],
 	"sideEffects": [
-		"**/*.css"
+		"**/*.svelte",
+		"**/*.svelte.ts",
+		"**/*.svelte.js"
 	],
 	"svelte": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -28,6 +43,9 @@
 		}
 	},
 	"peerDependencies": {
+		"@sveltejs/kit": "^2.0.0",
+		"peerjs": "^1.5.0",
+		"qrcode": "^1.5.0",
 		"svelte": "^5.0.0"
 	},
 	"devDependencies": {
@@ -35,13 +53,16 @@
 		"@sveltejs/kit": "^2.57.0",
 		"@sveltejs/package": "^2.5.7",
 		"@sveltejs/vite-plugin-svelte": "^7.0.0",
+		"@types/qrcode": "^1.5.6",
+		"@vitest/ui": "^4.1.5",
+		"jsdom": "^29.1.1",
+		"peerjs": "^1.5.5",
 		"publint": "^0.3.18",
+		"qrcode": "^1.5.4",
 		"svelte": "^5.55.2",
 		"svelte-check": "^4.4.6",
 		"typescript": "^6.0.2",
-		"vite": "^8.0.7"
-	},
-	"keywords": [
-		"svelte"
-	]
+		"vite": "^8.0.7",
+		"vitest": "^4.1.5"
+	}
 }
