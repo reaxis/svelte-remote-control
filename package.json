@@ -1,6 +1,6 @@
 {
 	"name": "@reaxis/svelte-remote-control",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Peer-to-peer WebRTC connection primitive for Svelte 5 with auto-QR, synced reactive state, and media calls.",
 	"keywords": [
 		"svelte",
@@ -12,6 +12,15 @@
 		"sveltekit"
 	],
 	"license": "MIT",
+	"author": "Koen Mostert <reaxis@gmail.com>",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/reaxis/svelte-remote-control.git"
+	},
+	"homepage": "https://github.com/reaxis/svelte-remote-control#readme",
+	"bugs": {
+		"url": "https://github.com/reaxis/svelte-remote-control/issues"
+	},
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build && npm run prepack",
