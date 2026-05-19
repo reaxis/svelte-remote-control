@@ -51,7 +51,7 @@ Note: `RemoteControl.svelte`'s `<script module>` still re-exports the API for ba
 
 - **Three-file split** is deliberate: all three files have zero SvelteKit deps. The library works in any Svelte 5 project — SvelteKit, plain Vite + Svelte, etc. `isBrowser = typeof window !== 'undefined'` guards SSR paths in `RemoteControl.svelte` instead of the former `browser` from `$app/environment`.
 - **Singleton + class, both exported.** The singleton (`connection` in `rcState.svelte.ts`) covers the common case. `WebRTCConnection` is exported as a class for apps that need multiple independent connections.
-- **Message types stay flexible, not strongly generic.** `send()` and `onMessage()` use `{ type: string; [k: string]: unknown }`. A generic `createChannel<T>()` was considered and deliberately rejected — flexibility is valued over compile-time message typing.
+- **Message types stay flexible, not strongly generic.** `send()` and `onMessage()` use `Record<string, unknown>` — any plain object. A `type` field is conventional for switch-style dispatch but not required; the library only reserves `__`-prefixed `type` values (`__sync`, `__sync_delete`, `__kick`) for internal routing. A generic `createChannel<T>()` was considered and deliberately rejected — flexibility is valued over compile-time message typing.
 - **`rcState` is last-write-wins (LWW)**, no causal ordering. Documented in the module docstring and README. Suitable for UI state, not counters/carts.
 - **Star topology assumption.** Clients connect to the host; the host rebroadcasts `__sync` messages to all other clients (sender excluded to prevent echo). A `onPeerConnect` hook flushes the full value map to each new peer.
 - **Optional validators** on `rcState(key, initial, validate?)`. Invalid persisted values are replaced with `initial`; invalid incoming `__sync` payloads are dropped and **not** rebroadcast.
@@ -81,7 +81,6 @@ Note: `RemoteControl.svelte`'s `<script module>` still re-exports the API for ba
 - **`acceptOffer` / `#createPeer` remove listeners mutually on resolve.** Don't simplify this into single `.once('error', reject)` + `.once('open', resolve)` — the stray listeners leak and mask later errors.
 - **Post-open peer errors** are handled by a persistent `peer.on('error')` in `#createPeer`. Fatal errors (`peer.destroyed`) set `status = 'error'`; transient `peer-unavailable` / `webrtc` errors only warn. A stale-listener guard (`this.#peer !== peer`) protects against callbacks firing after `destroy()`.
 - **Media calls are tracked** in `#mediaCalls: Set<MediaConnection>`. `#cleanup` closes them explicitly — don't rely on `peer.destroy()` cascading.
-- **PeerJS statically imports `@mediapipe/pose` internals even when unused.** This is the host project's problem; handled via Vite `optimizeDeps` exclusion + stub alias in the project root. Not a library concern unless you add BlazePose.
 - **`sessionStorage` is guarded** at module init (`typeof sessionStorage !== 'undefined'`) because a future SSR context might load this module before `window` exists. Don't remove the guard.
 - **Closing a browser tab doesn't cleanly close WebRTC DataConnections** — the SCTP channel doesn't send a FIN unless `dc.close()` is called explicitly. A `beforeunload` handler registered in `#createPeer` closes all open DataConnections so the remote peer receives `dc.on('close')` immediately instead of waiting ~30s for ICE keepalive timeout. The handler is deregistered in `#cleanup` to avoid leaks on explicit disconnect/reconnect.
 - **`remoteHref` is typed `string`**. Previously typed as `AppRoute` (SvelteKit's route union) but decoupled — consumers pass a plain path string like `"/remote"`.
@@ -113,7 +112,7 @@ Remaining before `npm publish`:
 | `qrcode` | peerDep + devDep | QR code generation for peer ID URL |
 | `svelte` ≥ 5 | peerDep + devDep | Runes (`$state`, `$derived`, `$effect`) |
 | `@types/qrcode` | devDep | TypeScript types |
-| `vitest`, `@vitest/ui`, `jsdom` | devDep | Test runner + environment |
+| `vitest`, `jsdom` | devDep | Test runner + environment |
 
 ---
 
