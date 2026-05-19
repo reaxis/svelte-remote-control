@@ -2,7 +2,6 @@
 
 [![npm version](https://img.shields.io/npm/v/svelte-remote-control.svg)](https://www.npmjs.com/package/svelte-remote-control)
 [![CI](https://github.com/reaxis/svelte-remote-control/actions/workflows/ci.yml/badge.svg)](https://github.com/reaxis/svelte-remote-control/actions/workflows/ci.yml)
-[![bundle size](https://img.shields.io/bundlephobia/minzip/svelte-remote-control)](https://bundlephobia.com/package/svelte-remote-control)
 [![license](https://img.shields.io/npm/l/svelte-remote-control.svg)](./LICENSE)
 
 Peer-to-peer connection primitive for Svelte 5 apps. Connect a host (e.g. a laptop) to one or more clients (e.g. phones) over WebRTC with a single `<RemoteControl />` component — no signalling server to run yourself, a QR code UI out of the box, and reactive state that syncs across peers.
