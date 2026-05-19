@@ -25,12 +25,13 @@
 	} from './rcState.svelte.js';
 
 	export { WebRTCConnection } from './webrtc.svelte.js';
-	export type { ConnectionStatus } from './webrtc.svelte.js';
+	export type { ConnectionStatus, WebRTCConnectionOptions } from './webrtc.svelte.js';
 </script>
 
 <script lang="ts">
 	import QRCode from 'qrcode';
 	import { connection } from './rcState.svelte.js';
+	import type { WebRTCConnectionOptions } from './webrtc.svelte.js';
 
 	interface Props {
 		/**
@@ -38,9 +39,11 @@
 		 * current page path (same route + `?id=`).
 		 */
 		remoteHref?: string;
+		/** ICE servers, peer server, and other connection options. */
+		config?: WebRTCConnectionOptions;
 	}
 
-	let { remoteHref }: Props = $props();
+	let { remoteHref, config }: Props = $props();
 
 	const isBrowser = typeof window !== 'undefined';
 
@@ -88,6 +91,8 @@
 	);
 
 	// ── Lifecycle ────────────────────────────────────────────────────────────
+
+	$effect(() => { if (config) myConn.configure(config); });
 
 	$effect(() => {
 		if (clientId) connect(clientId);

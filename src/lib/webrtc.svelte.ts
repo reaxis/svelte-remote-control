@@ -62,6 +62,20 @@ export class WebRTCConnection<TMessage extends { type: string } = { type: string
 		}
 	}
 
+	/**
+	 * Update connection options. Only fields that are explicitly present in
+	 * `options` are applied; omitted fields keep their existing value. Pass
+	 * `{ peerServer: undefined }` to explicitly clear a previously-set broker.
+	 *
+	 * Changes take effect on the next `createOffer()` / `acceptOffer()`. The
+	 * live `Peer` is not reconfigured in place — call `destroy()` and start
+	 * over to apply changes to an active connection.
+	 */
+	configure(options: WebRTCConnectionOptions): void {
+		if ('iceServers' in options && options.iceServers) this.#iceServers = options.iceServers;
+		if ('peerServer' in options) this.#peerServer = options.peerServer;
+	}
+
 	async createOffer(preferredId?: string): Promise<string> {
 		try {
 			this.#cleanup();

@@ -3,6 +3,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 // ── PeerJS mock ───────────────────────────────────────────────────────────────
 // Allows tests to control whether the mock peer fires 'open' or 'error'.
 let firePeerError: Error | null = null;
+const peerCtorCalls: unknown[][] = [];
 
 vi.mock('peerjs', () => {
 	class MockDataConnection {
@@ -22,7 +23,8 @@ vi.mock('peerjs', () => {
 		private _handlers = new Map<string, ((...args: unknown[]) => void)[]>();
 		private _onceError: ((...args: unknown[]) => void) | null = null;
 
-		constructor() {
+		constructor(...args: unknown[]) {
+			peerCtorCalls.push(args);
 			this.id = 'mock-peer-' + Math.random().toString(36).slice(2);
 		}
 
@@ -64,6 +66,7 @@ import { WebRTCConnection } from './webrtc.svelte.js';
 describe('WebRTCConnection', () => {
 	afterEach(() => {
 		firePeerError = null;
+		peerCtorCalls.length = 0;
 	});
 
 	it('initial status is idle', () => {
@@ -108,5 +111,60 @@ describe('WebRTCConnection', () => {
 		await expect(conn.createOffer()).rejects.toThrow();
 		expect(conn.status).toBe('error');
 		expect(conn.error).toContain('broker-unreachable');
+	});
+});
+
+describe('WebRTCConnection.configure', () => {
+	afterEach(() => {
+		peerCtorCalls.length = 0;
+	});
+
+	const lastPeerConfig = (): Record<string, unknown> | undefined => {
+		const args = peerCtorCalls.at(-1);
+		if (!args) return undefined;
+		// Peer is called as either new Peer(config) or new Peer(id, config).
+		return (typeof args[0] === 'string' ? args[1] : args[0]) as Record<string, unknown>;
+	};
+
+	it('updates only the iceServers field when peerServer is omitted', async () => {
+		const initial = [{ urls: 'stun:initial.example' }];
+		const broker = { host: 'broker.example', port: 9000 };
+		const conn = new WebRTCConnection({ iceServers: initial, peerServer: broker });
+
+		const updated = [{ urls: 'stun:updated.example' }];
+		conn.configure({ iceServers: updated });
+		await conn.createOffer();
+
+		const config = lastPeerConfig();
+		expect((config?.config as { iceServers: unknown }).iceServers).toEqual(updated);
+		// peerServer must NOT have been reset to undefined.
+		expect(config?.host).toBe('broker.example');
+		expect(config?.port).toBe(9000);
+	});
+
+	it('updates only the peerServer field when iceServers is omitted', async () => {
+		const initial = [{ urls: 'stun:keep.example' }];
+		const conn = new WebRTCConnection({ iceServers: initial });
+
+		conn.configure({ peerServer: { host: 'new-broker.example', port: 443, secure: true } });
+		await conn.createOffer();
+
+		const config = lastPeerConfig();
+		expect((config?.config as { iceServers: unknown }).iceServers).toEqual(initial);
+		expect(config?.host).toBe('new-broker.example');
+		expect(config?.secure).toBe(true);
+	});
+
+	it('explicitly passing peerServer: undefined clears the broker', async () => {
+		const conn = new WebRTCConnection({
+			peerServer: { host: 'old.example', port: 1234 }
+		});
+
+		conn.configure({ peerServer: undefined });
+		await conn.createOffer();
+
+		const config = lastPeerConfig();
+		expect(config?.host).toBeUndefined();
+		expect(config?.port).toBeUndefined();
 	});
 });
