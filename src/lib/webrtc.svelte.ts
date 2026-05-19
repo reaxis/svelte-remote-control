@@ -58,7 +58,7 @@ export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
 	{ urls: 'stun:stun2.l.google.com:19302' }
 ];
 
-export class WebRTCConnection<TMessage extends { type: string } = { type: string }> {
+export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<string, unknown>> {
 	status = $state<ConnectionStatus>('idle');
 	error = $state<string | null>(null);
 	connectedPeers = $state<string[]>([]);
@@ -236,7 +236,7 @@ export class WebRTCConnection<TMessage extends { type: string } = { type: string
 	kick(peerId: string): void {
 		const dc = this.#connections.get(peerId);
 		if (!dc) return;
-		dc.send({ type: '__kick' } as TMessage);
+		dc.send({ type: '__kick' } as unknown as TMessage);
 	}
 
 	destroy(): void {

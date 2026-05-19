@@ -140,10 +140,13 @@ Broadcast a JSON-serialisable message to all connected peers.
 ```ts
 import { send } from '@reaxis/svelte-remote-control';
 
-send({ type: 'notification', title: 'Hi!' });
+send({ title: 'Hi!', urgency: 2 });
 ```
 
-Messages must have a `type` field. Beyond that, the payload is free-form — this primitive optimises for flexibility.
+The payload is any plain object. A `type` field is conventional for
+switch-style dispatch in `onMessage`, but not required — the only constraint
+is that `type` values starting with `__` are reserved for library-internal
+messages (`__sync`, `__sync_delete`, `__kick`).
 
 ### `onMessage(handler)`
 

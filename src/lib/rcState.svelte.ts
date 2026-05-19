@@ -31,7 +31,7 @@ type DeleteMsg = { type: '__sync_delete'; key: string };
 
 // ── Module-level connection singleton ─────────────────────────────────────
 
-export const connection = new WebRTCConnection<{ type: string }>();
+export const connection = new WebRTCConnection();
 
 // ── rcState storage ───────────────────────────────────────────────────────
 
@@ -62,17 +62,17 @@ const _validators = new Map<string, (v: unknown) => boolean>();
 // `connection.destroy()` wipes live DataConnections but preserves the class's
 // handler sets by design, so the wiring below survives reconnects.
 
-function isSyncMsg(msg: { type: string }): msg is SyncMsg {
+function isSyncMsg(msg: Record<string, unknown>): msg is SyncMsg {
 	return msg.type === '__sync' && 'key' in msg && 'value' in msg
-		&& typeof (msg as { key: unknown }).key === 'string';
+		&& typeof msg.key === 'string';
 }
 
-function isDeleteMsg(msg: { type: string }): msg is DeleteMsg {
+function isDeleteMsg(msg: Record<string, unknown>): msg is DeleteMsg {
 	return msg.type === '__sync_delete' && 'key' in msg
-		&& typeof (msg as { key: unknown }).key === 'string';
+		&& typeof msg.key === 'string';
 }
 
-function rebroadcast(msg: { type: string }, fromPeerId: string): void {
+function rebroadcast(msg: Record<string, unknown>, fromPeerId: string): void {
 	for (const peerId of connection.connectedPeers) {
 		if (peerId !== fromPeerId) connection.sendTo(peerId, msg);
 	}
@@ -102,7 +102,7 @@ connection.onMessage((msg, fromPeerId) => {
 
 connection.onPeerConnect((peerId) => {
 	for (const key of Object.keys(_values)) {
-		connection.sendTo(peerId, { type: '__sync', key, value: _values[key] } as { type: string });
+		connection.sendTo(peerId, { type: '__sync', key, value: _values[key] });
 	}
 });
 
@@ -152,7 +152,7 @@ export function rcState<T>(
 			_values[key] = v;
 			persistValues();
 			if (connection.status === 'connected') {
-				connection.send({ type: '__sync', key, value: v } as { type: string });
+				connection.send({ type: '__sync', key, value: v });
 			}
 		}
 	};
@@ -169,7 +169,7 @@ export function deleteRcState(key: string): void {
 	_validators.delete(key);
 	persistValues();
 	if (connection.status === 'connected') {
-		connection.send({ type: '__sync_delete', key } as { type: string });
+		connection.send({ type: '__sync_delete', key });
 	}
 }
 
@@ -182,11 +182,16 @@ export function connStatus() { return connection.status; }
 /**
  * Broadcast a message to all connected peers.
  *
+ * The payload is any JSON-serialisable object. A `type` field is conventional
+ * for switch-style dispatch in `onMessage`, but not required — the library
+ * itself only reserves `type` values starting with `__` (e.g. `__sync`,
+ * `__kick`) for internal routing.
+ *
  * The sender's identity is available to receivers as the second argument of
  * `onMessage((msg, fromPeerId) => ...)` — authoritative and un-spoofable.
  */
-export function send(msg: { type: string; [k: string]: unknown }): void {
-	connection.send(msg as { type: string });
+export function send(msg: Record<string, unknown>): void {
+	connection.send(msg);
 }
 
 /**
@@ -234,7 +239,7 @@ export function onCall(handler: (stream: MediaStream) => void): () => void {
  * (Svelte will invoke the returned unsub on teardown.)
  */
 export function onMessage(
-	handler: (msg: { type: string; [k: string]: unknown }, fromPeerId: string) => void
+	handler: (msg: Record<string, unknown>, fromPeerId: string) => void
 ): () => void {
-	return connection.onMessage(handler as (msg: { type: string }, fromPeerId: string) => void);
+	return connection.onMessage(handler);
 }
