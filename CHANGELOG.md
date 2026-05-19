@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] - 2026-05-19
+
+### Changed
+- Expanded `keywords` in `package.json` (`runes`, `realtime`, `remote-control`,
+  `synced-state`) for better npm discoverability. No code changes.
+
 ## [0.2.0] - 2026-05-19
 
 ### Added

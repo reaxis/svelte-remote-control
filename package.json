@@ -1,15 +1,19 @@
 {
 	"name": "svelte-remote-control",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Peer-to-peer WebRTC connection primitive for Svelte 5 with auto-QR, synced reactive state, and media calls.",
 	"keywords": [
 		"svelte",
 		"svelte5",
+		"runes",
+		"sveltekit",
 		"webrtc",
 		"peerjs",
 		"peer-to-peer",
-		"qr-code",
-		"sveltekit"
+		"realtime",
+		"remote-control",
+		"synced-state",
+		"qr-code"
 	],
 	"license": "MIT",
 	"author": "Koen Mostert <reaxis@gmail.com>",
