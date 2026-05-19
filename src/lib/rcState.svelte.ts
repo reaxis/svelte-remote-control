@@ -62,26 +62,41 @@ const _validators = new Map<string, (v: unknown) => boolean>();
 // `connection.destroy()` wipes live DataConnections but preserves the class's
 // handler sets by design, so the wiring below survives reconnects.
 
+function isSyncMsg(msg: { type: string }): msg is SyncMsg {
+	return msg.type === '__sync' && 'key' in msg && 'value' in msg
+		&& typeof (msg as { key: unknown }).key === 'string';
+}
+
+function isDeleteMsg(msg: { type: string }): msg is DeleteMsg {
+	return msg.type === '__sync_delete' && 'key' in msg
+		&& typeof (msg as { key: unknown }).key === 'string';
+}
+
+function rebroadcast(msg: { type: string }, fromPeerId: string): void {
+	for (const peerId of connection.connectedPeers) {
+		if (peerId !== fromPeerId) connection.sendTo(peerId, msg);
+	}
+}
+
 connection.onMessage((msg, fromPeerId) => {
-	if (msg.type === '__sync') {
-		const m = msg as unknown as SyncMsg;
-		const validate = _validators.get(m.key);
-		if (validate && !validate(m.value)) {
-			console.warn(`rcState: dropping invalid __sync for "${m.key}"`, m.value);
+	if (isSyncMsg(msg)) {
+		const validate = _validators.get(msg.key);
+		if (validate && !validate(msg.value)) {
+			console.warn(`rcState: dropping invalid __sync for "${msg.key}"`, msg.value);
 			return;
 		}
-		_values[m.key] = m.value;
+		// Idempotency guard: if the incoming value matches what we already have,
+		// drop the rebroadcast to prevent N-peer amplification (a delete or write
+		// echoing back through the star topology).
+		if (msg.key in _values && Object.is(_values[msg.key], msg.value)) return;
+		_values[msg.key] = msg.value;
 		persistValues();
-		for (const peerId of connection.connectedPeers) {
-			if (peerId !== fromPeerId) connection.sendTo(peerId, msg);
-		}
-	} else if (msg.type === '__sync_delete') {
-		const m = msg as unknown as DeleteMsg;
-		delete _values[m.key];
+		rebroadcast(msg, fromPeerId);
+	} else if (isDeleteMsg(msg)) {
+		if (!(msg.key in _values)) return; // already gone — don't echo
+		delete _values[msg.key];
 		persistValues();
-		for (const peerId of connection.connectedPeers) {
-			if (peerId !== fromPeerId) connection.sendTo(peerId, msg);
-		}
+		rebroadcast(msg, fromPeerId);
 	}
 });
 

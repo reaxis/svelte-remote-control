@@ -99,4 +99,66 @@ describe('rcState', () => {
 		);
 		expect(s.value).toBe('dark');
 	});
+
+	it('rebroadcasts __sync to all peers except the sender', () => {
+		rcState('rebroadcast-test', 0);
+		mocks.connection.connectedPeers = ['peer-a', 'peer-b', 'peer-c'];
+
+		mocks.captured.messageHandler!(
+			{ type: '__sync', key: 'rebroadcast-test', value: 7 },
+			'peer-a'
+		);
+
+		const targets = mocks.connection.sendTo.mock.calls.map((c) => c[0]);
+		expect(targets).toEqual(['peer-b', 'peer-c']);
+	});
+
+	it('does not rebroadcast __sync when the value is unchanged', () => {
+		const s = rcState('idempotent-sync-test', 0);
+		s.value = 5;
+		mocks.connection.connectedPeers = ['peer-a', 'peer-b'];
+		mocks.connection.sendTo.mockClear();
+
+		mocks.captured.messageHandler!(
+			{ type: '__sync', key: 'idempotent-sync-test', value: 5 },
+			'peer-a'
+		);
+
+		expect(mocks.connection.sendTo).not.toHaveBeenCalled();
+	});
+
+	it('does not rebroadcast __sync_delete when the key is already absent', () => {
+		mocks.connection.connectedPeers = ['peer-a', 'peer-b'];
+		mocks.connection.sendTo.mockClear();
+
+		mocks.captured.messageHandler!(
+			{ type: '__sync_delete', key: 'never-existed' },
+			'peer-a'
+		);
+
+		expect(mocks.connection.sendTo).not.toHaveBeenCalled();
+	});
+
+	it('drops malformed __sync messages missing key or value', () => {
+		mocks.connection.connectedPeers = ['peer-a', 'peer-b'];
+		mocks.connection.sendTo.mockClear();
+
+		// Missing key
+		mocks.captured.messageHandler!(
+			{ type: '__sync', value: 1 },
+			'peer-a'
+		);
+		// Missing value
+		mocks.captured.messageHandler!(
+			{ type: '__sync', key: 'x' },
+			'peer-a'
+		);
+		// Non-string key
+		mocks.captured.messageHandler!(
+			{ type: '__sync', key: 42, value: 1 },
+			'peer-a'
+		);
+
+		expect(mocks.connection.sendTo).not.toHaveBeenCalled();
+	});
 });
