@@ -8,7 +8,7 @@
 <RemoteControl />
 
 <main>
-	<h1>@reaxis/svelte-remote-control demo</h1>
+	<h1>svelte-remote-control demo</h1>
 	<p class="hint">Open this page on another device (open the link or scan the QR in the top-right) to see state sync in action.</p>
 
 	<div class="sliders">

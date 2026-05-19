@@ -1,4 +1,4 @@
-# Agent Instructions — @reaxis/svelte-remote-control
+# Agent Instructions — svelte-remote-control
 
 After completing **any** change to this library — new files, modified logic, new dependencies, architectural decisions, or discovered gotchas — **update this file** to reflect the current state. Keep the Known Gotchas, Key Architecture Decisions, and File Layout sections accurate and up to date. Do not defer updates to a later session.
 
@@ -6,7 +6,7 @@ After completing **any** change to this library — new files, modified logic, n
 
 ## Scope
 
-This folder is a self-contained WebRTC connection primitive (`@reaxis/svelte-remote-control`). It is designed to be extractable into a standalone npm package. Keep it free of app-specific logic — the consuming project lives in `src/routes/`, not here.
+This folder is a self-contained WebRTC connection primitive (`svelte-remote-control`). It is designed to be extractable into a standalone npm package. Keep it free of app-specific logic — the consuming project lives in `src/routes/`, not here.
 
 ---
 
@@ -38,12 +38,12 @@ import RemoteControl, {
     connection,           // raw singleton WebRTCConnection instance
     WebRTCConnection,     // class, for advanced/multi-instance use
     DEFAULT_ICE_SERVERS,
-} from '@reaxis/svelte-remote-control';
+} from 'svelte-remote-control';
 ```
 
 `WebRTCConnection`, `ConnectionStatus`, `PeerServerOptions`, and `WebRTCConnectionOptions` are also exported for consumers who want the bare class without the singleton or UI.
 
-Note: `RemoteControl.svelte`'s `<script module>` still re-exports the API for backwards compatibility, but `index.ts` is the authoritative entry point. Consumers using `import ... from '@reaxis/svelte-remote-control'` get a default export (the component) plus all named exports.
+Note: `RemoteControl.svelte`'s `<script module>` still re-exports the API for backwards compatibility, but `index.ts` is the authoritative entry point. Consumers using `import ... from 'svelte-remote-control'` get a default export (the component) plus all named exports.
 
 ---
 

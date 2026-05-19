@@ -11,7 +11,7 @@
 	 * canonical consumer import path is the package entry point:
 	 *
 	 *   import RemoteControl, { send, onMessage, makeCall, onCall, connStatus, rcState }
-	 *     from '@reaxis/svelte-remote-control';
+	 *     from 'svelte-remote-control';
 	 *
 	 * These names are also re-exported from this file's `<script module>` for
 	 * backwards compatibility with internal `$lib` imports.

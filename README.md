@@ -1,4 +1,4 @@
-# @reaxis/svelte-remote-control
+# svelte-remote-control
 
 Peer-to-peer connection primitive for Svelte 5 apps. Connect a host (e.g. a laptop) to one or more clients (e.g. phones) over WebRTC with a single `<RemoteControl />` component — no signalling server to run yourself, a QR code UI out of the box, and reactive state that syncs across peers.
 
@@ -17,7 +17,7 @@ Built on [PeerJS](https://peerjs.com) for WebRTC transport, Svelte 5 runes for r
 ## Installation
 
 ```bash
-npm install @reaxis/svelte-remote-control
+npm install svelte-remote-control
 ```
 
 Peer dependencies: `svelte >= 5.0`, `peerjs`, `qrcode`.
@@ -29,7 +29,7 @@ between the host (laptop) and any client (phone) that connects to it:
 
 ```svelte
 <script lang="ts">
-    import RemoteControl, { rcState } from '@reaxis/svelte-remote-control';
+    import RemoteControl, { rcState } from 'svelte-remote-control';
 
     const brightness = rcState('brightness', 50);
 </script>
@@ -71,7 +71,7 @@ The component auto-detects its role from the URL: if `?id=…` is present, it ac
 Create a reactive value that automatically syncs to all connected peers.
 
 ```ts
-import { rcState } from '@reaxis/svelte-remote-control';
+import { rcState } from 'svelte-remote-control';
 
 const brightness = rcState('brightness', 50);
 
@@ -120,7 +120,7 @@ Possible values: `'idle' | 'gathering' | 'awaiting' | 'connected' | 'disconnecte
 Broadcast a JSON-serialisable message to all connected peers.
 
 ```ts
-import { send } from '@reaxis/svelte-remote-control';
+import { send } from 'svelte-remote-control';
 
 send({ title: 'Hi!', urgency: 2 });
 ```
@@ -135,7 +135,7 @@ messages (`__sync`, `__sync_delete`, `__kick`).
 Register an incoming-message handler. Returns an unsubscribe function — wrap in a `$effect` for automatic cleanup:
 
 ```ts
-import { onMessage } from '@reaxis/svelte-remote-control';
+import { onMessage } from 'svelte-remote-control';
 
 $effect(() => onMessage((msg, fromPeerId) => {
     if (msg.type === 'notification') {
@@ -153,7 +153,7 @@ $effect(() => onMessage((msg, fromPeerId) => {
 Acquire a local media stream via `getUserMedia` and call all connected peers with it. Supports audio-only, video-only, or both:
 
 ```ts
-import { startCall } from '@reaxis/svelte-remote-control';
+import { startCall } from 'svelte-remote-control';
 
 await startCall({ video: true });                              // video only
 await startCall({ audio: true });                              // audio only
@@ -168,7 +168,7 @@ Returns the acquired `MediaStream` so you can stop its tracks when disconnecting
 Lower-level: call all connected peers with a stream you acquired yourself. Use this when you want control over the timing of `getUserMedia` separately from the call (e.g. acquire before connection, call after).
 
 ```ts
-import { makeCall } from '@reaxis/svelte-remote-control';
+import { makeCall } from 'svelte-remote-control';
 
 const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
 // …later, once connected…
@@ -180,7 +180,7 @@ makeCall(stream);
 Register an incoming-stream handler. Returns an unsubscribe function — wrap in a `$effect` for automatic cleanup:
 
 ```ts
-import { onCall } from '@reaxis/svelte-remote-control';
+import { onCall } from 'svelte-remote-control';
 
 $effect(() => onCall((stream) => {
     videoEl.srcObject = stream;
@@ -193,7 +193,7 @@ $effect(() => onCall((stream) => {
 The singleton API covers most cases, but if you need multiple independent connections from one app (e.g. a dashboard that hosts one connection and clients on another), use the class directly:
 
 ```ts
-import { WebRTCConnection } from '@reaxis/svelte-remote-control';
+import { WebRTCConnection } from 'svelte-remote-control';
 
 const conn = new WebRTCConnection();
 
