@@ -4,13 +4,17 @@
 	 *
 	 * Add <RemoteControl /> to any route that needs a connection. Pass
 	 * `remoteHref="/remote"` to point the QR at a different route; omit for
-	 * same-route connections.
+	 * same-route connections. Pass `connection={...}` to bind the UI to a
+	 * non-singleton `WebRTCConnection` instance.
 	 *
-	 * The transport and reactive-sync primitives live in sibling files and are
-	 * re-exported below so existing callers can keep writing:
+	 * The transport and reactive-sync primitives live in sibling files. The
+	 * canonical consumer import path is the package entry point:
 	 *
 	 *   import RemoteControl, { send, onMessage, makeCall, onCall, connStatus, rcState }
-	 *     from '$lib/RemoteControl.svelte';
+	 *     from '@reaxis/svelte-remote-control';
+	 *
+	 * These names are also re-exported from this file's `<script module>` for
+	 * backwards compatibility with internal `$lib` imports.
 	 */
 
 	export {

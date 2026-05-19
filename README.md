@@ -77,6 +77,8 @@ Renders a small floating status trigger (top-right by default) with a popover co
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `remoteHref` | `string` | current page path | Path clients should be sent to (e.g. `"/remote"`). Omit for same-route connections (useful for peer-to-peer symmetric apps); set when host and client interfaces are on different routes. |
+| `config` | `WebRTCConnectionOptions` | — | ICE servers and/or PeerJS broker for this instance. Merged into the bound `WebRTCConnection` via `configure()`; fields take effect on the next `createOffer()` / `acceptOffer()`. |
+| `connection` | `WebRTCConnection` | module singleton | Bind this UI to a caller-supplied `WebRTCConnection`. Use when you need multiple independent connections in one app. Rendering two `<RemoteControl />` components against the same connection is a no-op-with-warning (each owns the connection's lifecycle). |
 
 The component auto-detects its role from the URL: if `?id=…` is present, it acts as a client and joins that peer ID; otherwise, it acts as a host and advertises its own ID.
 
