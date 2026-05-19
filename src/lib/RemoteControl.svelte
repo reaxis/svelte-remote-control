@@ -593,15 +593,6 @@
 		border-color: #aaa;
 	}
 
-	.peer-label {
-		font-size: 0.8rem;
-		font-weight: 600;
-		color: #888;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		margin: 0;
-	}
-
 	.divider {
 		border: none;
 		border-top: 1px solid #e8e8e8;
@@ -689,7 +680,6 @@
 		margin: 0;
 	}
 
-	.status-badge.connected    { background: #d4edda; color: #155724; }
 	.status-badge.disconnected { background: #fff3cd; color: #856404; }
 	.status-badge.error        { background: #f8d7da; color: #721c24; }
 

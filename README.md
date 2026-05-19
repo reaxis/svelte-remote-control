@@ -24,42 +24,24 @@ Peer dependencies: `svelte >= 5.0`, `peerjs`, `qrcode`.
 
 ## Quick start
 
-### Laptop / host route (`src/routes/+page.svelte`)
+Drop `<RemoteControl />` onto a single page and share one `rcState` value
+between the host (laptop) and any client (phone) that connects to it:
 
 ```svelte
 <script lang="ts">
-    import RemoteControl, { onCall } from '@reaxis/svelte-remote-control';
+    import RemoteControl, { rcState } from '@reaxis/svelte-remote-control';
 
-    let videoEl: HTMLVideoElement;
-
-    $effect(() => onCall((stream) => {
-        videoEl.srcObject = stream;
-        videoEl.play();
-    }));
+    const brightness = rcState('brightness', 50);
 </script>
 
-<RemoteControl remoteHref="/remote" />
+<RemoteControl />
 
-<video bind:this={videoEl} autoplay playsinline muted></video>
+<input type="range" min="0" max="100" bind:value={brightness.value} />
+<p>Brightness: {brightness.value}</p>
 ```
 
-### Phone / client route (`src/routes/remote/+page.svelte`)
-
-```svelte
-<script lang="ts">
-    import RemoteControl, { startCall, connStatus } from '@reaxis/svelte-remote-control';
-
-    $effect(() => {
-        if (connStatus() === 'connected') {
-            startCall({ video: { facingMode: 'environment' }, audio: false });
-        }
-    });
-</script>
-
-<RemoteControl remoteHref="/remote" />
-```
-
-Open the laptop page, scan the QR code with the phone — and you're connected.
+Open the page on your laptop, scan the QR code with your phone or open the link in another tab, and dragging
+the slider on either device/tab updates the other instantly.
 
 ## Component
 
