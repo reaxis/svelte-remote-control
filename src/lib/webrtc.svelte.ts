@@ -8,6 +8,20 @@
 
 import type { Peer, DataConnection, MediaConnection } from 'peerjs';
 
+/**
+ * Lifecycle states of a `WebRTCConnection`.
+ *
+ * - `'idle'`      — never started, or just destroyed. The connection has no
+ *                    live `Peer` and no broker session. Use this to detect
+ *                    "nothing to do" rather than "just lost a peer".
+ * - `'gathering'` — broker handshake / ICE gathering in progress.
+ * - `'awaiting'`  — host registered with the broker, waiting for a client.
+ * - `'connected'` — at least one DataConnection is open.
+ * - `'disconnected'` — the last peer went away while a connection was alive.
+ *                    Distinct from `'idle'`: implies prior connectivity, and
+ *                    typically pairs with a retry attempt on the client side.
+ * - `'error'`     — a fatal failure occurred; see `.error` for the message.
+ */
 export type ConnectionStatus =
 	| 'idle'
 	| 'gathering'
@@ -16,6 +30,15 @@ export type ConnectionStatus =
 	| 'disconnected'
 	| 'error';
 
+/**
+ * PeerJS broker server configuration. These fields are spread directly into
+ * the PeerJS `Peer` constructor; see the PeerJS docs for full semantics.
+ *
+ * - `host`/`port`/`path` — broker location (defaults to PeerJS’s public broker).
+ * - `secure` — use `wss://` (`true`) vs `ws://` (`false`). Defaults to `false`
+ *               in PeerJS unless the page is served over HTTPS.
+ * - `key` — API key required by some self-hosted brokers.
+ */
 export type PeerServerOptions = {
 	host?: string;
 	port?: number;
@@ -155,7 +178,14 @@ export class WebRTCConnection<TMessage extends { type: string } = { type: string
 		return () => this.#connectHandlers.delete(handler);
 	}
 
-	/** Call all connected peers with the given media stream. */
+	/**
+	 * Call all connected peers with the given media stream.
+	 *
+	 * Does **not** de-duplicate against existing media calls: invoking this
+	 * twice creates two independent `MediaConnection`s per peer. Track the
+	 * returned `MediaStream` from `startCall()` and stop its tracks before
+	 * calling again if you want to replace, not stack, streams.
+	 */
 	makeCall(stream: MediaStream): void {
 		if (!this.#peer) { console.warn('WebRTCConnection: cannot call — peer not initialised'); return; }
 		for (const peerId of this.#connections.keys()) {
@@ -192,6 +222,17 @@ export class WebRTCConnection<TMessage extends { type: string } = { type: string
 		return () => this.#callHandlers.delete(handler);
 	}
 
+	/**
+	 * Signal a peer to disconnect by sending a `__kick` message on its data
+	 * channel. **Does not close the underlying `DataConnection`** — the
+	 * receiving peer is expected to recognise `__kick` and call `destroy()`
+	 * itself (which is what `<RemoteControl />` does). A non-cooperating peer
+	 * remains connected.
+	 *
+	 * The `__` prefix on message type strings is reserved for library-internal
+	 * use (`__kick`, `__sync`, `__sync_delete`). Consumer messages must not use
+	 * `type` values starting with `__`.
+	 */
 	kick(peerId: string): void {
 		const dc = this.#connections.get(peerId);
 		if (!dc) return;
