@@ -26,12 +26,16 @@
 
 	export { WebRTCConnection } from './webrtc.svelte.js';
 	export type { ConnectionStatus, WebRTCConnectionOptions } from './webrtc.svelte.js';
+
+	// Tracks which `WebRTCConnection` instances are currently bound to a live
+	// `<RemoteControl />`. Used to warn when two components share one connection.
+	const _mountedConnections = new WeakSet<object>();
 </script>
 
 <script lang="ts">
 	import QRCode from 'qrcode';
-	import { connection } from './rcState.svelte.js';
-	import type { WebRTCConnectionOptions } from './webrtc.svelte.js';
+	import { connection as defaultConnection } from './rcState.svelte.js';
+	import type { WebRTCConnection, WebRTCConnectionOptions } from './webrtc.svelte.js';
 
 	interface Props {
 		/**
@@ -41,18 +45,28 @@
 		remoteHref?: string;
 		/** ICE servers, peer server, and other connection options. */
 		config?: WebRTCConnectionOptions;
+		/**
+		 * Optional `WebRTCConnection` instance to bind this UI to. Defaults to the
+		 * module-level singleton used by `send`, `onMessage`, `rcState`, etc. Pass
+		 * your own when you need multiple independent connections in one app.
+		 */
+		connection?: WebRTCConnection;
 	}
 
-	let { remoteHref, config }: Props = $props();
+	let { remoteHref, config, connection: injectedConnection }: Props = $props();
+
+	// Swapping the `connection` prop mid-life is not supported (the lifecycle
+	// effects below bind to whatever instance is current at mount). `$derived`
+	// silences the `state_referenced_locally` warning while keeping the
+	// initial-binding semantics consumers actually want.
+	const myConn = $derived(injectedConnection ?? defaultConnection);
 
 	const isBrowser = typeof window !== 'undefined';
 
 	// Captured once on mount: client-side URL rewrites (e.g. history.pushState to
 	// strip `?id=…` after connecting) must not tear down the live connection.
 	const clientId = isBrowser ? new URLSearchParams(window.location.search).get('id') : null;
-	const isClient = $derived(clientId !== null ? connection.role !== 'host' : connection.role === 'client');
-
-	const myConn = connection;
+	const isClient = $derived(clientId !== null ? myConn.role !== 'host' : myConn.role === 'client');
 
 	// ── Host state ──────────────────────────────────────────────────────────
 	const PEER_ID_KEY = 'rc:hostPeerId';
@@ -96,7 +110,20 @@
 	);
 
 	// ── Lifecycle ────────────────────────────────────────────────────────────
-
+	// Dev guard: warn if two `<RemoteControl />` instances bind to the same
+	// `WebRTCConnection`. Each instance owns the lifecycle of its connection
+	// (createOffer / destroy on mount/unmount), so sharing one leads to
+	// connection thrash. Pass distinct `connection={...}` props instead.
+	$effect(() => {
+		if (_mountedConnections.has(myConn)) {
+			console.warn(
+				'RemoteControl: multiple components are bound to the same WebRTCConnection. ' +
+				'Pass a distinct `connection={...}` prop per instance.'
+			);
+		}
+		_mountedConnections.add(myConn);
+		return () => { _mountedConnections.delete(myConn); };
+	});
 	$effect(() => { if (config) myConn.configure(config); });
 
 	$effect(() => {
