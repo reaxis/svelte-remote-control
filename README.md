@@ -243,7 +243,7 @@ const conn = new WebRTCConnection({
 ## Requirements
 
 - Svelte 5.0 or newer (uses runes). Works with SvelteKit, plain Vite + Svelte, or any other build setup.
-- A browser with WebRTC support (all modern evergreen browsers).
+- A browser with WebRTC support (all modern evergreen browsers). The status panel uses the Popover API where available and falls back to its own show/hide elsewhere (e.g. Safari before 17).
 - HTTPS or `localhost` for `getUserMedia` in media calls.
 
 ## Security considerations

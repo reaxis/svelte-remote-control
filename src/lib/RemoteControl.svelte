@@ -67,6 +67,12 @@
 
 	const isBrowser = typeof window !== 'undefined';
 
+	// The Popover API needs Safari 17+ (so iPadOS/iOS 17+ for every browser
+	// there). Without it, `:popover-open` is an invalid selector — `matches()`
+	// throws a SyntaxError — and `popover` / `popovertarget` do nothing, so the
+	// panel is shown and hidden by the component itself instead.
+	const popoverSupported = isBrowser && Object.prototype.hasOwnProperty.call(HTMLElement.prototype, 'popover');
+
 	// Captured once on mount: client-side URL rewrites (e.g. history.pushState to
 	// strip `?id=…` after connecting) must not tear down the live connection.
 	const clientId = isBrowser ? new URLSearchParams(window.location.search).get('id') : null;
@@ -80,6 +86,7 @@
 
 	// ── Client state ────────────────────────────────────────────────────────
 	let peerIdInput = $state('');
+	let anchorEl = $state<HTMLElement | null>(null);
 	let popoverEl = $state<HTMLElement | null>(null);
 	let popoverOpen = $state(false);
 	let retryPeerId = $state<string | null>(null);
@@ -145,10 +152,28 @@
 	// on the popover element syncs DOM → state (captures manual user dismiss
 	// via Escape / outside click / trigger button).
 	$effect(() => {
-		if (!popoverEl) return;
+		if (!popoverEl || !popoverSupported) return;
 		const isOpen = popoverEl.matches(':popover-open');
 		if (popoverOpen && !isOpen) popoverEl.showPopover();
 		else if (!popoverOpen && isOpen) popoverEl.hidePopover();
+	});
+
+	// Fallback light dismiss, as `popover="auto"` gives natively: Escape or a
+	// press outside the trigger and panel closes it.
+	$effect(() => {
+		if (popoverSupported || !popoverOpen) return;
+		const onPointerDown = (e: PointerEvent) => {
+			if (anchorEl && !anchorEl.contains(e.target as Node)) popoverOpen = false;
+		};
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') popoverOpen = false;
+		};
+		document.addEventListener('pointerdown', onPointerDown);
+		document.addEventListener('keydown', onKeyDown);
+		return () => {
+			document.removeEventListener('pointerdown', onPointerDown);
+			document.removeEventListener('keydown', onKeyDown);
+		};
 	});
 
 	// Client flow: auto-open while connecting, auto-close once connected.
@@ -267,8 +292,14 @@
 	}
 </script>
 
-<div class="conn-anchor">
-	<button class="conn-trigger" popovertarget="conn-popover" aria-label="Connection status">
+<div class="conn-anchor" bind:this={anchorEl}>
+	<button
+		class="conn-trigger"
+		popovertarget="conn-popover"
+		aria-label="Connection status"
+		aria-expanded={popoverSupported ? undefined : popoverOpen}
+		onclick={() => { if (!popoverSupported) popoverOpen = !popoverOpen; }}
+	>
 		{#if myConn.status === 'idle' || myConn.status === 'gathering'}
 			<span class="trigger-spinner"></span>
 		{:else if myConn.status === 'connected'}
@@ -297,6 +328,8 @@
 		id="conn-popover"
 		popover="auto"
 		class="conn-popover"
+		class:fallback={!popoverSupported}
+		class:open={popoverOpen}
 		bind:this={popoverEl}
 		ontoggle={(e) => { popoverOpen = (e as ToggleEvent).newState === 'open'; }}
 	>
@@ -502,6 +535,11 @@
 	}
 
 	.conn-popover:popover-open { display: flex; }
+
+	/* Without the Popover API. Kept apart from the rule above: a browser that
+	   doesn't know :popover-open drops the whole rule it appears in. */
+	.conn-popover.fallback { display: none; }
+	.conn-popover.fallback.open { display: flex; }
 
 	.conn-header {
 		display: flex;

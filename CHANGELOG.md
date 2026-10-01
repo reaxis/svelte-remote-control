@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- `<RemoteControl />` works in browsers without the Popover API (Safari < 17,
+  so every browser on iOS/iPadOS < 17). Mounting used to throw a SyntaxError
+  on `:popover-open`, which also aborted setup elsewhere on the page. The
+  panel now opens and closes from the trigger itself there, with Escape and
+  outside-click dismiss.
+
 ## [0.2.1] - 2026-05-19
 
 ### Changed

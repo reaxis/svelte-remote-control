@@ -19,6 +19,7 @@ This folder is a self-contained WebRTC connection primitive (`svelte-remote-cont
 | `RemoteControl.svelte` | UI (QR + popover status). Re-exports the full public API through `<script module>`. | `rcState.svelte.ts`, `qrcode` |
 | `index.ts` | Package entry point — re-exports full public API (preferred consumer import path). | `RemoteControl.svelte`, `rcState.svelte.ts`, `webrtc.svelte.ts` |
 | `rcState.test.ts` | Tests for `rcState` LWW semantics, storage, validators. | vitest, jsdom |
+| `RemoteControl.test.ts` | Mounts the component in jsdom (no Popover API) to test the popover fallback. | vitest, jsdom |
 | `webrtc.test.ts` | Tests for `WebRTCConnection` state machine. | vitest, jsdom |
 | `README.md` | Consumer-facing package documentation. |  |
 
@@ -60,6 +61,7 @@ Note: `RemoteControl.svelte`'s `<script module>` still re-exports the API for ba
 - **`_peerId` / `_role` tagging was removed** from `send()`. The `fromPeerId` argument in `onMessage((msg, fromPeerId) => ...)` comes from the underlying DataConnection and is authoritative / un-spoofable.
 - **Reactive UI URLs** in `RemoteControl.svelte` use `$derived` (not `$state` + effect) so `QRCode.toDataURL()` only re-runs when the URL string identity actually changes. A `cancelled` flag on the generation effect prevents stale promises from overwriting newer QRs.
 - **Popover state** uses a single `popoverOpen` $state with a DOM-sync `$effect` (idempotent, guards with `:popover-open`) plus an `ontoggle` handler to capture manual dismiss. No imperative `showPopover()` / `hidePopover()` scattered through lifecycle code.
+- **Popover fallback for browsers without the Popover API** (Safari < 17, so every browser on iOS/iPadOS < 17). There `:popover-open` is an invalid selector, so the DOM-sync effect's `matches()` throws a SyntaxError ("The string did not match the expected pattern.") during mount, and `popover` / `popovertarget` are inert. `popoverSupported` (`'popover'` own property of `HTMLElement.prototype`) gates the DOM-sync effect. Without support, the trigger's `onclick` toggles `popoverOpen`, the panel gets `.fallback` / `.open` classes for visibility, and a separate effect gives light dismiss (Escape, or a `pointerdown` outside `.conn-anchor`). The fallback CSS is in its own rules, apart from `.conn-popover:popover-open`, because an old browser drops any rule whose selector it can't parse.
 - **Retry uses reactive `retryAttempt`** (`$state`). The retry `$effect` depends on it explicitly, so increments deterministically schedule the next attempt instead of relying on status-transition coincidence.
 - **`WebRTCConnection` constructor accepts an options object or a legacy `RTCIceServer[]` array.** `new WebRTCConnection({ iceServers, peerServer })` or the old `new WebRTCConnection(iceServersArray)` both work. `peerServer` is spread into the PeerJS constructor config, enabling custom brokers (host/port/path/secure/key). The array form is preserved for backwards compat.
 - **`__kick` is a system message for bidirectional disconnect.** `WebRTCConnection.kick(peerId)` sends `{ type: '__kick' }` to the target peer — it does NOT close the DataConnection itself. The receiver calls `disconnect()` (stops retry, transitions to host mode). This same path handles both host-initiated kicks and client-initiated disconnects (the client's "Disconnect" button calls `disconnect()` directly; the host's kick button sends `__kick` and the client calls `disconnect()` in response). Consumer message types must not use `__`-prefixed type strings.
@@ -85,6 +87,7 @@ Note: `RemoteControl.svelte`'s `<script module>` still re-exports the API for ba
 - **Closing a browser tab doesn't cleanly close WebRTC DataConnections** — the SCTP channel doesn't send a FIN unless `dc.close()` is called explicitly. A `beforeunload` handler registered in `#createPeer` closes all open DataConnections so the remote peer receives `dc.on('close')` immediately instead of waiting ~30s for ICE keepalive timeout. The handler is deregistered in `#cleanup` to avoid leaks on explicit disconnect/reconnect.
 - **`remoteHref` is typed `string`**. Previously typed as `AppRoute` (SvelteKit's route union) but decoupled — consumers pass a plain path string like `"/remote"`.
 - **Writing large Svelte files via shell heredoc fails** when content contains backticks. Use `create_file` or edit via tool calls.
+- **One effect throwing during mount aborts the effects after it, page-wide.** Before the popover fallback, Safari 16's throw on `:popover-open` also stopped unrelated components on the consumer's page from finishing setup (a slider in recontrols lost its touch-scroll guard). It surfaced only as an unhandled promise rejection, from SvelteKit's async client start. Feature-detect any API newer than the browsers you support before using it in an effect.
 - **`kick()` only signals — it does not close the DataConnection.** If the remote peer does not handle `__kick` (e.g. a non-`RemoteControl` client), the connection stays open. Don't add `dc.close()` back to `kick()` without reconsidering the whole disconnect flow.
 
 ---
@@ -124,6 +127,9 @@ Watch mode: `npm run test:watch`
 Tests live in `src/lib/`:
 - `webrtc.test.ts` — mocks `peerjs` via `vi.mock`; tests `WebRTCConnection` state machine.
 - `rcState.test.ts` — mocks `./webrtc.svelte.js` via `vi.mock` + `vi.hoisted`; tests `rcState` LWW semantics, storage, and validators.
+- `RemoteControl.test.ts` — same mock, then `mount()`s the component. jsdom has no Popover API, so it exercises the fallback; one test also makes `matches(':popover-open')` throw like Safari 16. All three fail against the pre-fallback component.
+
+**Gotcha:** `mount()` needs Svelte's browser build. `vitest.config.ts` sets `resolve.conditions: ['browser']` under Vitest, or `mount` throws `lifecycle_function_unavailable`.
 
 **Gotcha:** The `vi.mock` factory runs before variable declarations, so mock state (e.g. captured handlers) must be created via `vi.hoisted()`. Using arrow functions in `vi.fn(...)` for constructors doesn't work — use `vi.fn(function() { return obj; })`.
 
