@@ -339,7 +339,7 @@ A fixed list (`iceServers: [...]`) works as well, e.g. with static credentials, 
 
 ## Development playground
 
-Run `npm run dev` to open the playground. The home route (`/`) acts as the host pane; scan the QR code with a phone (or open `/remote?id=…` in a second tab) to connect as a client. To try it with TURN, set `VITE_TURN_CREDENTIALS_URL` to an endpoint like the one in [TURN servers](#turn-servers) when running or building it.
+Run `npm run dev` to open the playground. The home route (`/`) acts as the host pane; scan the QR code with a phone (or open `/remote?id=…` in a second tab) to connect as a client. To try it with TURN, set `VITE_TURN_CREDENTIALS_URL` to an endpoint like the one in [TURN servers](#turn-servers) when running or building it. To try it with your own PeerJS broker, set `VITE_PEER_SERVER_URL` to its address (absolute, or a path on the same site).
 
 ## License
 

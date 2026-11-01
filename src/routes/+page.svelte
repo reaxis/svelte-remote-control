@@ -1,5 +1,6 @@
 <script lang="ts">
-	import RemoteControl, { rcState } from '$lib/index.js';
+	import { browser } from '$app/environment';
+	import RemoteControl, { rcState, type PeerServerOptions, type WebRTCConnectionOptions } from '$lib/index.js';
 
 	const brightness = rcState('brightness', 50);
 	const hue = rcState('hue', 180);
@@ -13,9 +14,24 @@
 		if (!res.ok) throw new Error(`TURN credentials: HTTP ${res.status}`);
 		return (await res.json()).iceServers;
 	}
+
+	// Optional PeerJS broker (e.g. a self-hosted peerjs-server), set at build time as
+	// its address: absolute, or a path on this site. Without it: the public broker.
+	const brokerUrl: string | undefined = import.meta.env.VITE_PEER_SERVER_URL;
+
+	function peerServer(url: string): PeerServerOptions {
+		const { protocol, hostname, port, pathname } = new URL(url, location.href);
+		const secure = protocol === 'https:';
+		return { host: hostname, port: port ? Number(port) : secure ? 443 : 80, path: pathname, secure };
+	}
+
+	const config: WebRTCConnectionOptions | undefined =
+		turnUrl || brokerUrl && browser
+			? { ...(turnUrl && { iceServers }), ...(brokerUrl && browser && { peerServer: peerServer(brokerUrl) }) }
+			: undefined;
 </script>
 
-<RemoteControl config={turnUrl ? { iceServers } : undefined} />
+<RemoteControl {config} />
 
 <main>
 	<h1>svelte-remote-control demo</h1>
