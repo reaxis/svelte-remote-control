@@ -92,6 +92,9 @@
 	let retryPeerId = $state<string | null>(null);
 	let retryAttempt = $state(0);
 	let retryCountdown = $state(0);
+	// Kept across retries: each attempt clears `myConn.errorType` while it runs,
+	// but the reason the previous one failed is still worth showing.
+	let lastErrorType = $state<string | null>(null);
 	let hostQr = $state('');
 	let copiedHostId = $state(false);
 	let copiedHostUrl = $state(false);
@@ -138,7 +141,9 @@
 	$effect(() => { if (config) myConn.configure(config); });
 
 	$effect(() => {
-		if (clientId) connect(clientId);
+		// A failed connect shows through `myConn.status` / `errorType` and the
+		// retry effect; the rejection itself needs no handler.
+		if (clientId) connect(clientId).catch(() => {});
 		else startOffer();
 		return () => myConn.destroy();
 	});
@@ -182,6 +187,11 @@
 		if (!isClient) return;
 		if (myConn.status === 'gathering') popoverOpen = true;
 		else if (myConn.status === 'connected') popoverOpen = false;
+	});
+
+	$effect(() => {
+		if (myConn.status === 'error') lastErrorType = myConn.errorType;
+		else if (myConn.status === 'connected' || !retryPeerId) lastErrorType = null;
 	});
 
 	$effect(() => {
@@ -292,6 +302,10 @@
 	}
 </script>
 
+{#snippet noRouteHint()}
+	<p class="hint">The network seems to block a direct connection between the devices. This often happens when both are on the same Wi-Fi; switching one to mobile data usually helps.</p>
+{/snippet}
+
 <div class="conn-anchor" bind:this={anchorEl}>
 	<button
 		class="conn-trigger"
@@ -345,10 +359,13 @@
 			{#if myConn.status === 'gathering'}
 				<p class="hint">Connecting…</p>
 				<div class="spinner"></div>
+				{#if retryPeerId && lastErrorType === 'no-route'}
+					{@render noRouteHint()}
+				{/if}
 
 			{:else if myConn.status === 'idle' && retryPeerId}
 				<p class="status-badge disconnected">Disconnected</p>
-				<button class="btn secondary" onclick={() => connect(retryPeerId!)}>Reconnect</button>
+				<button class="btn secondary" onclick={() => connect(retryPeerId!).catch(() => {})}>Reconnect</button>
 
 			{:else if myConn.status === 'connected'}
 				{#if hostQr}
@@ -380,7 +397,15 @@
 
 			{:else if myConn.status === 'error'}
 				{#if retryPeerId}
-					<p class="status-badge disconnected">Disconnected</p>
+					{#if myConn.errorType === 'no-route'}
+						<p class="status-badge error">Can't reach the host</p>
+						{@render noRouteHint()}
+					{:else if myConn.errorType === 'peer-unavailable'}
+						<p class="status-badge disconnected">Host not found</p>
+						<p class="hint">Is the host still open?</p>
+					{:else}
+						<p class="status-badge disconnected">Disconnected</p>
+					{/if}
 					<p class="hint">Retrying in {retryCountdown}s…</p>
 					<button class="btn secondary" onclick={stopRetry}>Stop</button>
 				{:else}
@@ -419,7 +444,7 @@
 					<p class="hint">… or connect to a host by ID:</p>
 					<div class="peer-connect-row">
 						<input class="peer-input" type="text" placeholder="Paste ID…" bind:value={peerIdInput} />
-						<button class="btn secondary btn-sm" onclick={() => connect()} disabled={!peerIdInput.trim()}>Connect</button>
+						<button class="btn secondary btn-sm" onclick={() => connect().catch(() => {})} disabled={!peerIdInput.trim()}>Connect</button>
 					</div>
 				{:else}
 					<hr class="divider" />

@@ -3,6 +3,9 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 // ── PeerJS mock ───────────────────────────────────────────────────────────────
 // Allows tests to control whether the mock peer fires 'open' or 'error'.
 let firePeerError: Error | null = null;
+// When true, the mock DataConnection never opens, so a test can fail its ICE.
+let holdDcOpen = false;
+let lastDc: { peerConnection: EventTarget & { connectionState: string }; close: ReturnType<typeof vi.fn> } | null = null;
 const peerCtorCalls: unknown[][] = [];
 
 interface MockPeerHandle {
@@ -11,6 +14,7 @@ interface MockPeerHandle {
 	call: ReturnType<typeof vi.fn>;
 	destroy: ReturnType<typeof vi.fn>;
 	id: string;
+	options: { config?: RTCConfiguration };
 }
 interface MockMediaConnectionHandle {
 	peer: string;
@@ -25,9 +29,11 @@ vi.mock('peerjs', () => {
 	class MockDataConnection {
 		peer = 'host-peer-id';
 		open = true;
+		peerConnection = Object.assign(new EventTarget(), { connectionState: 'new', iceConnectionState: 'new' });
 		private _handlers = new Map<string, ((...args: unknown[]) => void)[]>();
+		constructor() { lastDc = this; }
 		once = vi.fn((event: string, fn: (...args: unknown[]) => void) => {
-			if (event === 'open') queueMicrotask(() => fn());
+			if (event === 'open' && !holdDcOpen) queueMicrotask(() => fn());
 		});
 		on = vi.fn((event: string, fn: (...args: unknown[]) => void) => {
 			if (!this._handlers.has(event)) this._handlers.set(event, []);
@@ -60,12 +66,14 @@ vi.mock('peerjs', () => {
 
 	class MockPeer {
 		id: string;
+		options: { config?: RTCConfiguration };
 		destroyed = false;
 		private _handlers = new Map<string, ((...args: unknown[]) => void)[]>();
 		private _onceError: ((...args: unknown[]) => void) | null = null;
 
 		constructor(...args: unknown[]) {
 			peerCtorCalls.push(args);
+			this.options = (typeof args[0] === 'string' ? args[1] : args[0]) as { config?: RTCConfiguration };
 			this.id = 'mock-peer-' + Math.random().toString(36).slice(2);
 			lastPeer = this as unknown as MockPeerHandle;
 		}
@@ -354,5 +362,246 @@ describe('WebRTCConnection.destroy', () => {
 		onHandlers.stream(stream);
 
 		expect(seen).toEqual([stream]);
+	});
+});
+
+describe('WebRTCConnection ICE failure warnings', () => {
+	let warn: ReturnType<typeof vi.spyOn>;
+	beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+	afterEach(() => { warn.mockRestore(); lastPeer = null; });
+
+	/** Host with one incoming connection whose RTCPeerConnection events the test drives. */
+	async function hostWithIncoming(iceServers?: RTCIceServer[]) {
+		const conn = new WebRTCConnection(iceServers ? { iceServers } : undefined);
+		await conn.createOffer();
+		const pc = Object.assign(new EventTarget(), { connectionState: 'new', iceConnectionState: 'new' });
+		const dc = { peer: 'client-a', open: false, peerConnection: pc, send: vi.fn(), close: vi.fn(), on: vi.fn() };
+		lastPeer!.emit('connection', dc);
+		return {
+			state: (state: string) => {
+				pc.connectionState = state;
+				pc.dispatchEvent(new Event('connectionstatechange'));
+			},
+			iceState: (state: string) => {
+				pc.iceConnectionState = state;
+				pc.dispatchEvent(new Event('iceconnectionstatechange'));
+			},
+			candidate: (type: string) => pc.dispatchEvent(Object.assign(new Event('icecandidate'), { candidate: { type } })),
+			turnError: (url: string, errorCode: number, errorText: string) =>
+				pc.dispatchEvent(Object.assign(new Event('icecandidateerror'), { url, errorCode, errorText }))
+		};
+	}
+	const turn = [{ urls: 'turn:turn.example:3478', username: 'u', credential: 'c' }];
+	const message = () => String(warn.mock.calls.at(-1)?.[0]);
+
+	it('suggests a TURN server when none is configured', async () => {
+		const { state, candidate } = await hostWithIncoming();
+		candidate('host');
+		candidate('srflx');
+		state('connecting');
+		state('failed');
+		expect(warn).toHaveBeenCalledOnce();
+		expect(message()).toContain('could not connect to peer client-a');
+		expect(message()).toContain('No TURN server is configured');
+		expect(message()).toContain('#turn-servers');
+	});
+
+	it('lists TURN errors when a TURN server gave no relay address', async () => {
+		const { state, candidate, turnError } = await hostWithIncoming(turn);
+		candidate('srflx');
+		turnError('stun:stun.example:3478', 701, 'ignored');
+		turnError('turn:turn.example:3478?transport=udp', 401, 'Unauthorized');
+		state('failed');
+		expect(message()).toContain('None of the configured TURN servers');
+		expect(message()).toContain('turn:turn.example:3478?transport=udp (401 Unauthorized)');
+		expect(message()).not.toContain('stun.example');
+	});
+
+	it('points at the other device when this one got a relay address', async () => {
+		const { state, candidate } = await hostWithIncoming(turn);
+		candidate('relay');
+		state('failed');
+		expect(message()).toContain('other device couldn');
+	});
+
+	it('reports a lost connection, not a setup problem, after ICE had connected', async () => {
+		const { state } = await hostWithIncoming();
+		state('connected');
+		state('disconnected');
+		state('failed');
+		expect(message()).toContain('lost the connection to peer client-a');
+		expect(message()).not.toContain('TURN');
+	});
+
+	it('also catches a failure reported only through iceConnectionState, once', async () => {
+		const { state, iceState } = await hostWithIncoming();
+		iceState('checking');
+		iceState('failed');
+		state('failed');
+		expect(warn).toHaveBeenCalledOnce();
+		expect(message()).toContain('No TURN server is configured');
+	});
+
+	it('stays quiet when ICE succeeds', async () => {
+		const { state } = await hostWithIncoming();
+		state('connecting');
+		state('connected');
+		expect(warn).not.toHaveBeenCalled();
+	});
+});
+
+describe('WebRTCConnection when no network path works', () => {
+	let warn: ReturnType<typeof vi.spyOn>;
+	beforeEach(() => {
+		warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		holdDcOpen = true;
+		lastDc = null;
+	});
+	afterEach(() => { warn.mockRestore(); holdDcOpen = false; lastDc = null; lastPeer = null; });
+
+	it('rejects acceptOffer with errorType no-route instead of waiting forever', async () => {
+		const conn = new WebRTCConnection();
+		const accepting = conn.acceptOffer('host-peer-id');
+		await vi.waitFor(() => expect(lastDc).not.toBeNull());
+		const pc = lastDc!.peerConnection;
+		pc.connectionState = 'failed';
+		pc.dispatchEvent(new Event('connectionstatechange'));
+
+		await expect(accepting).rejects.toMatchObject({ type: 'no-route' });
+		expect(conn.status).toBe('error');
+		expect(conn.errorType).toBe('no-route');
+		expect(conn.error).toContain('no network path');
+		expect(lastDc!.close).toHaveBeenCalled();
+		expect(warn).toHaveBeenCalledOnce();
+	});
+
+	it('clears errorType on the next attempt and on destroy', async () => {
+		const conn = new WebRTCConnection();
+		const accepting = conn.acceptOffer('host-peer-id');
+		await vi.waitFor(() => expect(lastDc).not.toBeNull());
+		lastDc!.peerConnection.connectionState = 'failed';
+		lastDc!.peerConnection.dispatchEvent(new Event('connectionstatechange'));
+		await accepting.catch(() => {});
+
+		holdDcOpen = false;
+		const retry = conn.acceptOffer('host-peer-id');
+		expect(conn.errorType).toBeNull();
+		await retry;
+		conn.destroy();
+		expect(conn.errorType).toBeNull();
+	});
+});
+
+describe('WebRTCConnection when the host never answers', () => {
+	beforeEach(() => { vi.useFakeTimers(); holdDcOpen = true; lastDc = null; });
+	afterEach(() => { vi.useRealTimers(); holdDcOpen = false; lastDc = null; lastPeer = null; });
+
+	it('rejects acceptOffer with peer-unavailable after 10 s without an answer', async () => {
+		const conn = new WebRTCConnection();
+		const accepting = conn.acceptOffer('gone-host');
+		const settled = accepting.catch((err) => err);
+		await vi.advanceTimersByTimeAsync(9_999);
+		expect(conn.status).toBe('gathering');
+		await vi.advanceTimersByTimeAsync(1);
+		expect(await settled).toMatchObject({ type: 'peer-unavailable' });
+		expect(conn.status).toBe('error');
+		expect(conn.errorType).toBe('peer-unavailable');
+		expect(lastDc!.close).toHaveBeenCalled();
+	});
+
+	it('leaves a host that answered to ICE', async () => {
+		const conn = new WebRTCConnection();
+		conn.acceptOffer('slow-host').catch(() => {});
+		await vi.advanceTimersByTimeAsync(0);
+		Object.assign(lastDc!.peerConnection, { remoteDescription: { type: 'answer', sdp: '' } });
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(conn.status).toBe('gathering');
+	});
+
+	it('does nothing once destroyed', async () => {
+		const conn = new WebRTCConnection();
+		conn.acceptOffer('gone-host').catch(() => {});
+		await vi.advanceTimersByTimeAsync(0);
+		conn.destroy();
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(conn.status).toBe('idle');
+		expect(conn.errorType).toBeNull();
+	});
+});
+
+describe('WebRTCConnection errorType', () => {
+	afterEach(() => { firePeerError = null; lastPeer = null; });
+
+	it('takes the PeerJS error type', async () => {
+		firePeerError = Object.assign(new Error('broker down'), { type: 'network' });
+		const conn = new WebRTCConnection();
+		await expect(conn.createOffer()).rejects.toThrow('broker down');
+		expect(conn.errorType).toBe('network');
+	});
+});
+
+describe('WebRTCConnection iceServers function', () => {
+	let warn: ReturnType<typeof vi.spyOn>;
+	beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+	afterEach(() => { warn.mockRestore(); vi.useRealTimers(); lastPeer = null; });
+
+	const turn = (n: number) => [{ urls: 'turn:turn.example', username: `u${n}`, credential: 'c' }];
+
+	it('is called for every new Peer, and its result configures it', async () => {
+		let n = 0;
+		const iceServers = vi.fn(async () => turn(++n));
+		const conn = new WebRTCConnection({ iceServers });
+		await conn.createOffer();
+		expect(lastPeer!.options.config?.iceServers).toEqual(turn(1));
+		await conn.acceptOffer('host-peer-id');
+		expect(lastPeer!.options.config?.iceServers).toEqual(turn(2));
+		expect(iceServers).toHaveBeenCalledTimes(2);
+	});
+
+	it('falls back to DEFAULT_ICE_SERVERS when it rejects', async () => {
+		const { DEFAULT_ICE_SERVERS } = await import('./webrtc.svelte.js');
+		const conn = new WebRTCConnection({ iceServers: async () => { throw new Error('endpoint down'); } });
+		await conn.createOffer();
+		expect(lastPeer!.options.config?.iceServers).toEqual(DEFAULT_ICE_SERVERS);
+		expect(conn.status).toBe('awaiting');
+		expect(String(warn.mock.calls[0]?.[0])).toContain('iceServers function failed');
+	});
+
+	it('also accepts a function set through configure()', async () => {
+		const conn = new WebRTCConnection();
+		conn.configure({ iceServers: () => turn(7) });
+		await conn.createOffer();
+		expect(lastPeer!.options.config?.iceServers).toEqual(turn(7));
+	});
+
+	it('refreshes the live Peer every hour, keeping the old list if a refresh fails', async () => {
+		vi.useFakeTimers();
+		let n = 0;
+		let fail = false;
+		const conn = new WebRTCConnection({
+			iceServers: async () => { if (fail) throw new Error('down'); return turn(++n); }
+		});
+		await conn.createOffer();
+		const peer = lastPeer!;
+		expect(peer.options.config?.iceServers).toEqual(turn(1));
+
+		await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+		expect(peer.options.config?.iceServers).toEqual(turn(2));
+
+		fail = true;
+		await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+		expect(peer.options.config?.iceServers).toEqual(turn(2));
+
+		fail = false;
+		conn.destroy();
+		await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+		expect(n).toBe(2);
+	});
+
+	it('sets no refresh timer for a fixed list', async () => {
+		vi.useFakeTimers();
+		const conn = new WebRTCConnection({ iceServers: turn(1) });
+		await conn.createOffer();
+		expect(vi.getTimerCount()).toBe(0);
 	});
 });

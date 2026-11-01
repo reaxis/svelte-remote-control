@@ -47,10 +47,25 @@ export type PeerServerOptions = {
 	key?: string;
 };
 
+/**
+ * ICE servers as a fixed list, or a function that returns one. A function is
+ * called for every new `Peer` (each `createOffer()` / `acceptOffer()`) and
+ * again every `ICE_REFRESH_MS` while it lives, so short-lived TURN credentials
+ * can be fetched fresh. If it throws or rejects, a new `Peer` falls back to
+ * `DEFAULT_ICE_SERVERS` and a refresh keeps the previous list.
+ */
+export type IceServersSource = RTCIceServer[] | (() => RTCIceServer[] | Promise<RTCIceServer[]>);
+
 export type WebRTCConnectionOptions = {
-	iceServers?: RTCIceServer[];
+	iceServers?: IceServersSource;
 	peerServer?: PeerServerOptions;
 };
+
+/** How long a client waits for the host to answer its offer. */
+const ANSWER_TIMEOUT_MS = 10_000;
+
+/** How often a live `Peer` re-runs an `iceServers` function (1 hour). */
+const ICE_REFRESH_MS = 60 * 60 * 1000;
 
 export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
 	{ urls: 'stun:stun.l.google.com:19302' },
@@ -61,6 +76,13 @@ export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
 export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<string, unknown>> {
 	status = $state<ConnectionStatus>('idle');
 	error = $state<string | null>(null);
+	/**
+	 * Machine-readable kind of the current `error`: PeerJS's error type (e.g.
+	 * `'peer-unavailable'`, `'network'`), or `'no-route'` when the devices
+	 * found each other but no network path between them worked (see the
+	 * README's "TURN servers"). `null` when there is no error or no type.
+	 */
+	errorType = $state<string | null>(null);
 	connectedPeers = $state<string[]>([]);
 	role = $state<'host' | 'client' | null>(null);
 	localPeerId = $state('');
@@ -71,7 +93,10 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 	#handlers = new Set<(msg: TMessage, fromPeerId: string) => void>();
 	#connectHandlers = new Set<(peerId: string) => void>();
 	#callHandlers = new Set<(stream: MediaStream) => void>();
-	#iceServers: RTCIceServer[];
+	#iceServers: IceServersSource;
+	/** The list the live `Peer` uses: `#iceServers`, resolved. */
+	#activeIceServers: RTCIceServer[] = DEFAULT_ICE_SERVERS;
+	#iceRefreshTimer: ReturnType<typeof setInterval> | null = null;
 	#peerServer: PeerServerOptions | undefined;
 	#unloadHandler: (() => void) | null = null;
 
@@ -104,6 +129,7 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 			this.#cleanup();
 			this.status = 'gathering';
 			this.error = null;
+			this.errorType = null;
 			this.role = 'host';
 
 			let peer: Peer;
@@ -117,12 +143,16 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 				}
 			}
 
-			peer.on('connection', (dc) => { this.#attachConnection(dc, false); });
+			peer.on('connection', (dc) => {
+				this.#watchIce(dc);
+				this.#attachConnection(dc, false);
+			});
 			this.status = 'awaiting';
 			return peer.id;
 		} catch (err) {
 			this.status = 'error';
 			this.error = err instanceof Error ? err.message : String(err);
+			this.errorType = errorTypeOf(err);
 			throw err;
 		}
 	}
@@ -132,15 +162,33 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 			this.#cleanup();
 			this.status = 'gathering';
 			this.error = null;
+			this.errorType = null;
 			this.role = 'client';
 
 			const peer = await this.#createPeer();
 
 			const dc = await new Promise<DataConnection>((resolve, reject) => {
 				const conn = peer.connect(hostId, { reliable: true, serialization: 'json' });
-				conn.once('open', () => resolve(conn));
-				conn.once('error', reject);
-				peer.once('error', reject);
+				const fail = (message: string, type: string) => {
+					clearTimeout(answerTimer);
+					if (this.#peer !== peer) return; // destroyed meanwhile
+					conn.close();
+					reject(Object.assign(new Error(message), { type }));
+				};
+				// Without these two, the client can wait forever: a connection with
+				// no working network path never settles in Chrome (see #watchIce),
+				// and the broker reports a missing host (`peer-unavailable`) only
+				// sometimes; on a retry it often stays silent.
+				this.#watchIce(conn, () => fail(
+					`Could not reach peer ${hostId}: no network path between the devices worked.`,
+					'no-route'
+				));
+				const answerTimer = setTimeout(() => {
+					if (!conn.peerConnection?.remoteDescription) fail(`Peer ${hostId} did not answer.`, 'peer-unavailable');
+				}, ANSWER_TIMEOUT_MS);
+				conn.once('open', () => { clearTimeout(answerTimer); resolve(conn); });
+				conn.once('error', (err) => { clearTimeout(answerTimer); reject(err); });
+				peer.once('error', (err) => { clearTimeout(answerTimer); reject(err); });
 			});
 
 			this.#connections.set(dc.peer, dc);
@@ -150,6 +198,7 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 		} catch (err) {
 			this.status = 'error';
 			this.error = err instanceof Error ? err.message : String(err);
+			this.errorType = errorTypeOf(err);
 			throw err;
 		}
 	}
@@ -243,13 +292,15 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 		this.#cleanup();
 		this.status = 'idle';
 		this.error = null;
+		this.errorType = null;
 		// Do NOT clear #handlers or #connectHandlers — module-level registrations
 		// persist across reconnects by design.
 	}
 
 	async #createPeer(peerId?: string): Promise<Peer> {
 		const { Peer: PeerClass } = await import('peerjs');
-		const peerConfig = { config: { iceServers: this.#iceServers }, ...(this.#peerServer ?? {}) };
+		this.#activeIceServers = (await this.#resolveIceServers()) ?? DEFAULT_ICE_SERVERS;
+		const peerConfig = { config: { iceServers: this.#activeIceServers }, ...(this.#peerServer ?? {}) };
 		const peer = peerId
 			? new PeerClass(peerId, peerConfig)
 			: new PeerClass(peerConfig);
@@ -272,6 +323,7 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 			if (peer.destroyed) {
 				this.status = 'error';
 				this.error = `${type}: ${err.message}`;
+				this.errorType = type;
 			} else if (type === 'peer-unavailable' || type === 'webrtc') {
 				// Transient per-attempt error; active connections are unaffected.
 				console.warn(`WebRTCConnection: non-fatal peer error (${type}):`, err.message);
@@ -289,6 +341,19 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 
 		this.localPeerId = peer.id;
 
+		// PeerJS reads `peer.options.config` for every new RTCPeerConnection, so
+		// refreshing it keeps a long-lived host's TURN credentials valid for the
+		// clients that join later.
+		if (this.#iceRefreshTimer) clearInterval(this.#iceRefreshTimer);
+		if (typeof this.#iceServers === 'function') {
+			this.#iceRefreshTimer = setInterval(async () => {
+				const iceServers = await this.#resolveIceServers();
+				if (!iceServers || this.#peer !== peer) return;
+				this.#activeIceServers = iceServers;
+				peer.options.config = { ...peer.options.config, iceServers };
+			}, ICE_REFRESH_MS);
+		}
+
 		// Explicitly close DataConnections on tab close so the remote end receives
 		// an SCTP FIN and fires dc.on('close') immediately (without this, the host
 		// waits ~30s for ICE keepalives to time out).
@@ -301,7 +366,59 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 		return peer;
 	}
 
+	/** Resolve `#iceServers`; `null` (after a warning) if its function fails. */
+	async #resolveIceServers(): Promise<RTCIceServer[] | null> {
+		const source = this.#iceServers;
+		if (typeof source !== 'function') return source;
+		try {
+			const iceServers = await source();
+			if (!Array.isArray(iceServers)) throw new TypeError(`expected an array, got ${typeof iceServers}`);
+			return iceServers;
+		} catch (err) {
+			console.warn('WebRTCConnection: the iceServers function failed; using DEFAULT_ICE_SERVERS (no TURN) for a new connection, or the previous list for a refresh:', err);
+			return null;
+		}
+	}
+
+	/**
+	 * Explain a failed connection in the console. PeerJS reports nothing useful
+	 * here: in Chrome, `iceConnectionState` stops at `'disconnected'` and never
+	 * reaches `'failed'`, so PeerJS's `negotiation-failed` error never fires and
+	 * the client waits forever. `connectionState` does reach `'failed'`, about
+	 * 15 s after the checks start; `iceConnectionState` is watched too, for
+	 * browsers that only report that one. Candidate types and
+	 * TURN errors are recorded along the way to tell the likely causes apart.
+	 */
+	#watchIce(conn: { peer: string; peerConnection?: RTCPeerConnection }, onFailed?: () => void): void {
+		const pc = conn.peerConnection;
+		if (!pc) return;
+		const candidateTypes = new Set<string>();
+		const turnErrors = new Set<string>();
+		let wasConnected = false;
+		let warned = false;
+		pc.addEventListener('icecandidate', (e) => {
+			if (e.candidate?.type) candidateTypes.add(e.candidate.type);
+		});
+		pc.addEventListener('icecandidateerror', (e) => {
+			if (/^turns?:/.test(e.url)) turnErrors.add(`${e.url} (${e.errorCode} ${e.errorText})`);
+		});
+		const onStateChange = (state: string) => {
+			if (state === 'connected' || state === 'completed') wasConnected = true;
+			if (state !== 'failed' || warned) return;
+			warned = true;
+			if (wasConnected) {
+				console.warn(`WebRTCConnection: lost the connection to peer ${conn.peer}: the network changed, or the other device went offline.`);
+				return;
+			}
+			console.warn(iceFailureMessage(conn.peer, this.#activeIceServers, candidateTypes, [...turnErrors]));
+			onFailed?.();
+		};
+		pc.addEventListener('connectionstatechange', () => onStateChange(pc.connectionState));
+		pc.addEventListener('iceconnectionstatechange', () => onStateChange(pc.iceConnectionState));
+	}
+
 	#attachMediaCall(call: MediaConnection): void {
+		this.#watchIce(call);
 		this.#mediaCalls.add(call);
 		call.on('stream', (stream: MediaStream) => {
 			for (const h of this.#callHandlers) h(stream);
@@ -339,6 +456,7 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 			if (this.#connections.size === 0) {
 				this.status = 'error';
 				this.error = err instanceof Error ? err.message : String(err);
+				this.errorType = errorTypeOf(err);
 			}
 		});
 
@@ -354,6 +472,10 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 	}
 
 	#cleanup(): void {
+		if (this.#iceRefreshTimer) {
+			clearInterval(this.#iceRefreshTimer);
+			this.#iceRefreshTimer = null;
+		}
 		if (this.#unloadHandler) {
 			window.removeEventListener('beforeunload', this.#unloadHandler);
 			this.#unloadHandler = null;
@@ -374,4 +496,41 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 		}
 		this.role = null;
 	}
+}
+
+function errorTypeOf(err: unknown): string | null {
+	const type = (err as { type?: unknown } | null)?.type;
+	return typeof type === 'string' ? type : null;
+}
+
+const TURN_DOCS = 'https://github.com/reaxis/svelte-remote-control#turn-servers';
+
+function hasTurnServer(iceServers: RTCIceServer[]): boolean {
+	return iceServers.some((s) => [s.urls].flat().some((url) => /^turns?:/.test(url)));
+}
+
+function iceFailureMessage(
+	peerId: string,
+	iceServers: RTCIceServer[],
+	candidateTypes: Set<string>,
+	turnErrors: string[]
+): string {
+	const head = `WebRTCConnection: could not connect to peer ${peerId}: no network path between the two devices worked.`;
+	if (!hasTurnServer(iceServers)) {
+		return `${head}
+No TURN server is configured, so only direct connections were tried. These often fail when:
+- both devices are on the same Wi-Fi, and the router blocks traffic between its devices or doesn't support NAT hairpinning;
+- either device is on a guest, public or corporate network;
+- either device is behind a strict NAT (some mobile networks).
+Switching one device to mobile data often works around it. To fix it, configure a TURN relay: ${TURN_DOCS}`;
+	}
+	if (!candidateTypes.has('relay')) {
+		const errors = turnErrors.length ? `\nTURN errors:\n- ${turnErrors.join('\n- ')}` : '';
+		return `${head}
+None of the configured TURN servers gave this device a relay address. Check the TURN URLs, and that the credentials are valid (temporary ones expire).${errors}
+See ${TURN_DOCS}`;
+	}
+	return `${head}
+This device got a TURN relay address, but the other device couldn't use it. Check that the other device has the same TURN servers configured, with valid credentials, and that its network allows TURN (a turns: URL on port 443 gets through the most firewalls).
+See ${TURN_DOCS}`;
 }

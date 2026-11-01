@@ -3,9 +3,19 @@
 
 	const brightness = rcState('brightness', 50);
 	const hue = rcState('hue', 180);
+
+	// Optional endpoint returning `{ iceServers }` with TURN credentials, set at
+	// build time (see the README's "TURN servers"). Without it: STUN only.
+	const turnUrl: string | undefined = import.meta.env.VITE_TURN_CREDENTIALS_URL;
+
+	async function iceServers(): Promise<RTCIceServer[]> {
+		const res = await fetch(turnUrl!, { signal: AbortSignal.timeout(5000) });
+		if (!res.ok) throw new Error(`TURN credentials: HTTP ${res.status}`);
+		return (await res.json()).iceServers;
+	}
 </script>
 
-<RemoteControl />
+<RemoteControl config={turnUrl ? { iceServers } : undefined} />
 
 <main>
 	<h1>svelte-remote-control demo</h1>

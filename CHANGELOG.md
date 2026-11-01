@@ -3,6 +3,31 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- A console warning when two devices can't connect: no network path between
+  them worked (ICE failed). It names the likely cause (no TURN server
+  configured; a TURN server that gave no relay address, with its errors; or a
+  relay the other device couldn't use) and links to the new README section.
+- `iceServers` can be a function (sync or async) returning the list, to fetch
+  short-lived TURN credentials. It's called for every new connection and
+  hourly while one lives; if it fails, the defaults are used.
+- `WebRTCConnection.errorType`: `'no-route'`, `'peer-unavailable'` or another
+  PeerJS error type, next to the existing `error` message.
+- README: a "TURN servers" section on why connections fail on the same Wi-Fi
+  and on restrictive networks, and how to set up a TURN relay.
+
+### Fixed
+- A client no longer waits forever on "Connecting…". When no network path
+  works, `acceptOffer()` now rejects after about 15 s (`errorType`
+  `'no-route'`); when the host doesn't answer within 10 s, it rejects with
+  `'peer-unavailable'` (the PeerJS broker reports a missing host only
+  sometimes). `<RemoteControl />` shows "Can't reach the host" (with a hint)
+  or "Host not found" while it retries.
+- `<RemoteControl />` no longer leaves an unhandled promise rejection when a
+  client's connection attempt fails.
+
 ## [0.2.2] - 2026-10-01
 
 ### Fixed

@@ -12,4 +12,4 @@ export {
 	connection,
 } from './rcState.svelte.js';
 export { WebRTCConnection, DEFAULT_ICE_SERVERS } from './webrtc.svelte.js';
-export type { ConnectionStatus, PeerServerOptions, WebRTCConnectionOptions } from './webrtc.svelte.js';
+export type { ConnectionStatus, IceServersSource, PeerServerOptions, WebRTCConnectionOptions } from './webrtc.svelte.js';
