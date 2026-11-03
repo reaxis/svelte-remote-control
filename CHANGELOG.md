@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- A connection stopped and restarted while it was still starting (e.g. a quick
+  remount) no longer creates a second PeerJS `Peer` that stays registered with
+  the broker. An attempt replaced by a newer `createOffer()` / `acceptOffer()`
+  or by `destroy()` now stops and rejects with `type: 'superseded'`, without
+  touching the state.
+- `<RemoteControl />` no longer leaves an unhandled rejection when hosting
+  fails (the error shows in the panel, as before), and Stop or Disconnect
+  during a reconnect attempt no longer counts as a failed attempt.
+- The small buttons in the panel (Connect, Disconnect) are small again: the
+  general button rule overrode their size.
+
 ## [0.3.0] - 2026-11-01
 
 ### Added

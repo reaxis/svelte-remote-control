@@ -67,6 +67,12 @@ const ANSWER_TIMEOUT_MS = 10_000;
 /** How often a live `Peer` re-runs an `iceServers` function (1 hour). */
 const ICE_REFRESH_MS = 60 * 60 * 1000;
 
+/** Thrown by an attempt that a later `createOffer()` / `acceptOffer()` / `destroy()` replaced. */
+class SupersededError extends Error {
+	readonly type = 'superseded';
+	constructor() { super('WebRTCConnection: superseded by a newer attempt'); }
+}
+
 export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
 	{ urls: 'stun:stun.l.google.com:19302' },
 	{ urls: 'stun:stun1.l.google.com:19302' },
@@ -87,6 +93,12 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 	role = $state<'host' | 'client' | null>(null);
 	localPeerId = $state('');
 
+	/**
+	 * Bumped by every `#cleanup()`. An attempt remembers the value it started
+	 * with and stops (`SupersededError`) once it changes, so a slow attempt
+	 * can't install its `Peer` after a newer attempt or a `destroy()`.
+	 */
+	#epoch = 0;
 	#peer: Peer | null = null;
 	#connections = new Map<string, DataConnection>();
 	#mediaCalls = new Set<MediaConnection>();
@@ -124,9 +136,15 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 		if ('peerServer' in options) this.#peerServer = options.peerServer;
 	}
 
+	/**
+	 * Register with the broker as a host and wait for clients. Rejects on
+	 * failure (also shown through `status` / `error`), or with an error of
+	 * `type` `'superseded'` when a newer attempt or `destroy()` replaced it.
+	 */
 	async createOffer(preferredId?: string): Promise<string> {
+		this.#cleanup();
+		const epoch = this.#epoch;
 		try {
-			this.#cleanup();
 			this.status = 'gathering';
 			this.error = null;
 			this.errorType = null;
@@ -134,10 +152,10 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 
 			let peer: Peer;
 			try {
-				peer = await this.#createPeer(preferredId);
+				peer = await this.#createPeer(epoch, preferredId);
 			} catch (err) {
 				if (preferredId && (err as { type?: string }).type === 'unavailable-id') {
-					peer = await this.#createPeer();
+					peer = await this.#createPeer(epoch);
 				} else {
 					throw err;
 				}
@@ -150,6 +168,7 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 			this.status = 'awaiting';
 			return peer.id;
 		} catch (err) {
+			if (epoch !== this.#epoch) throw err; // a newer attempt owns the state
 			this.status = 'error';
 			this.error = err instanceof Error ? err.message : String(err);
 			this.errorType = errorTypeOf(err);
@@ -157,15 +176,21 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 		}
 	}
 
+	/**
+	 * Connect to the host with ID `hostId`. Rejects on failure (also shown
+	 * through `status` / `error` / `errorType`), or with an error of `type`
+	 * `'superseded'` when a newer attempt or `destroy()` replaced it.
+	 */
 	async acceptOffer(hostId: string): Promise<void> {
+		this.#cleanup();
+		const epoch = this.#epoch;
 		try {
-			this.#cleanup();
 			this.status = 'gathering';
 			this.error = null;
 			this.errorType = null;
 			this.role = 'client';
 
-			const peer = await this.#createPeer();
+			const peer = await this.#createPeer(epoch);
 
 			const dc = await new Promise<DataConnection>((resolve, reject) => {
 				const conn = peer.connect(hostId, { reliable: true, serialization: 'json' });
@@ -191,11 +216,13 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 				peer.once('error', (err) => { clearTimeout(answerTimer); reject(err); });
 			});
 
+			if (epoch !== this.#epoch) { dc.close(); throw new SupersededError(); }
 			this.#connections.set(dc.peer, dc);
 			this.connectedPeers = [...this.#connections.keys()];
 			this.status = 'connected';
 			this.#attachConnection(dc, true);
 		} catch (err) {
+			if (epoch !== this.#epoch) throw err; // a newer attempt owns the state
 			this.status = 'error';
 			this.error = err instanceof Error ? err.message : String(err);
 			this.errorType = errorTypeOf(err);
@@ -297,9 +324,14 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 		// persist across reconnects by design.
 	}
 
-	async #createPeer(peerId?: string): Promise<Peer> {
+	async #createPeer(epoch: number, peerId?: string): Promise<Peer> {
 		const { Peer: PeerClass } = await import('peerjs');
-		this.#activeIceServers = (await this.#resolveIceServers()) ?? DEFAULT_ICE_SERVERS;
+		const iceServers = (await this.#resolveIceServers()) ?? DEFAULT_ICE_SERVERS;
+		// Either await can outlast a newer attempt (e.g. a destroy() and a new
+		// start right after mounting). Creating the Peer anyway would orphan it,
+		// still registered with the broker under the same ID.
+		if (epoch !== this.#epoch) throw new SupersededError();
+		this.#activeIceServers = iceServers;
 		const peerConfig = { config: { iceServers: this.#activeIceServers }, ...(this.#peerServer ?? {}) };
 		const peer = peerId
 			? new PeerClass(peerId, peerConfig)
@@ -307,11 +339,16 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 		this.#peer = peer;
 
 		await new Promise<void>((resolve, reject) => {
-			const onOpen = () => { peer.off('error', onError); resolve(); };
-			const onError = (err: Error) => { peer.off('open', onOpen); reject(err); };
+			const off = () => { peer.off('open', onOpen); peer.off('error', onError); peer.off('close', onClose); };
+			const onOpen = () => { off(); resolve(); };
+			const onError = (err: Error) => { off(); reject(err); };
+			// destroy() while opening: PeerJS then emits 'close', not 'error'.
+			const onClose = () => { off(); reject(new SupersededError()); };
 			peer.once('open', onOpen);
 			peer.once('error', onError);
+			peer.once('close', onClose);
 		});
+		if (this.#peer !== peer) throw new SupersededError(); // destroyed while opening
 
 		// Persistent error handler for post-open errors (signaling loss, fatal
 		// socket errors, transient peer-unavailable on later connect/call attempts).
@@ -472,6 +509,7 @@ export class WebRTCConnection<TMessage extends Record<string, unknown> = Record<
 	}
 
 	#cleanup(): void {
+		this.#epoch++;
 		if (this.#iceRefreshTimer) {
 			clearInterval(this.#iceRefreshTimer);
 			this.#iceRefreshTimer = null;

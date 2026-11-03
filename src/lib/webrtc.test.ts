@@ -605,3 +605,42 @@ describe('WebRTCConnection iceServers function', () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 });
+
+describe('WebRTCConnection superseded attempts', () => {
+	beforeEach(() => { peerCtorCalls.length = 0; });
+
+	// What a quick remount does (e.g. navigating away and back at once, or
+	// React's StrictMode): start, destroy, start, while the first attempt is
+	// still starting. An `iceServers` function holds it there until released.
+	it('creates one Peer for start → destroy → start', async () => {
+		let release!: (servers: RTCIceServer[]) => void;
+		const gate = new Promise<RTCIceServer[]>((resolve) => { release = resolve; });
+		const iceServers = vi.fn(() => gate);
+		const conn = new WebRTCConnection({ iceServers });
+
+		const first = conn.createOffer('saved-id');
+		await vi.waitFor(() => expect(iceServers).toHaveBeenCalledTimes(1));
+		conn.destroy();
+		const second = conn.createOffer('saved-id');
+		await vi.waitFor(() => expect(iceServers).toHaveBeenCalledTimes(2));
+		release([]);
+
+		await expect(first).rejects.toMatchObject({ type: 'superseded' });
+		await expect(second).resolves.toEqual(expect.any(String));
+		expect(peerCtorCalls).toHaveLength(1);
+		expect(peerCtorCalls[0][0]).toBe('saved-id');
+		expect(conn.status).toBe('awaiting');
+		expect(conn.error).toBeNull();
+	});
+
+	it('leaves the state of a destroy() alone', async () => {
+		const conn = new WebRTCConnection();
+		const attempt = conn.acceptOffer('host-peer-id');
+		conn.destroy();
+
+		await expect(attempt).rejects.toMatchObject({ type: 'superseded' });
+		expect(peerCtorCalls).toHaveLength(0);
+		expect(conn.status).toBe('idle');
+		expect(conn.errorType).toBeNull();
+	});
+});
