@@ -149,6 +149,8 @@ Tests live in `src/lib/`:
 - **Language**: TypeScript
 - **Package Manager**: npm
 - **Add-ons**: mcp
+- **SvelteKit 3** (dev only: the playground in `src/routes` and `svelte-package`). There is no `svelte.config.js`: the config (adapter-static, `paths.base: '/svrc'`, runes mode) is passed to `sveltekit({...})` in `vite.config.ts`. The playground imports the library through `#lib/...` (Node subpath imports in `package.json`), not `$lib`. `tsconfig.json` extends `$app/tsconfig`. Needs Node 22.17+.
+- **`npm audit`** still lists `deepmerge` (low; no fixed version exists), through `@sveltejs/vite-plugin-svelte` and with it Kit and adapter-static. It only merges the plugin's own config. Dev-only; `npm audit --omit=dev` is clean.
 
 ---
 

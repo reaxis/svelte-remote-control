@@ -14,7 +14,7 @@
 	 *     from 'svelte-remote-control';
 	 *
 	 * These names are also re-exported from this file's `<script module>` for
-	 * backwards compatibility with internal `$lib` imports.
+	 * backwards compatibility with internal `#lib` imports.
 	 */
 
 	export {

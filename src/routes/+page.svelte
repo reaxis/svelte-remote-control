@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
-	import RemoteControl, { rcState, type PeerServerOptions, type WebRTCConnectionOptions } from '$lib/index.js';
+	import { browser } from '$app/env';
+	import RemoteControl, { rcState, type PeerServerOptions, type WebRTCConnectionOptions } from '#lib/index.js';
 
 	const brightness = rcState('brightness', 50);
 	const hue = rcState('hue', 180);
