@@ -122,7 +122,7 @@ Remaining before `npm publish`:
 | `qrcode` | peerDep + devDep | QR code generation for peer ID URL |
 | `svelte` ≥ 5 | peerDep + devDep | Runes (`$state`, `$derived`, `$effect`) |
 | `@types/qrcode` | devDep | TypeScript types |
-| `vitest`, `jsdom` | devDep | Test runner + environment |
+| `vitest` ≥ 5, `jsdom` | devDep | Test runner + environment. Vitest 4 gave the second of two concurrent `import('peerjs')` calls the real module instead of the `vi.mock` one; 5 doesn't. Needs Node 22.12+ (CI uses 22). |
 
 ---
 
